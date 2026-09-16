@@ -24,7 +24,7 @@ export function StatisticsCard({
   return (
     <Card
       className={cn(
-        'gap-0 rounded-xl border border-gray-200 bg-white p-0 shadow-none dark:border-gray-700 dark:bg-gray-900',
+        'gap-0 rounded-xl p-0 shadow-none',
         className
       )}
     >

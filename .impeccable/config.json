@@ -1,0 +1,62 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "http://localhost:3000/**"
+        ],
+        "createdAt": "2026-09-14T03:46:19.950Z",
+        "reason": "Kena tombol shadcn tinggi tetap (h-8/h-9), teks terpusat vertikal"
+      },
+      {
+        "rule": "layout-transition",
+        "value": "*",
+        "files": [
+          "http://localhost:3000/**"
+        ],
+        "createdAt": "2026-09-14T03:46:20.140Z",
+        "reason": "Berasal dari stylesheet sonner, bukan kode aplikasi"
+      },
+      {
+        "rule": "nested-cards",
+        "value": "*",
+        "files": [
+          "http://localhost:3000/login"
+        ],
+        "createdAt": "2026-09-14T05:44:38.093Z",
+        "reason": "card-footer shadcn (border-top) terdeteksi sbg card; struktur standar"
+      },
+      {
+        "rule": "nested-cards",
+        "value": "*",
+        "files": [
+          "http://localhost:3000/verifikasi"
+        ],
+        "createdAt": "2026-09-14T05:44:38.272Z",
+        "reason": "card-footer shadcn terdeteksi sbg card; struktur standar"
+      },
+      {
+        "rule": "nested-cards",
+        "value": "*",
+        "files": [
+          "http://localhost:3000/otp"
+        ],
+        "createdAt": "2026-09-14T05:44:38.459Z",
+        "reason": "card-footer shadcn terdeteksi sbg card; struktur standar"
+      },
+      {
+        "rule": "blinking-cursor",
+        "value": "*",
+        "files": [
+          "http://localhost:3000/otp"
+        ],
+        "createdAt": "2026-09-14T05:44:38.637Z",
+        "reason": "caret asli dari InputOTP shadcn, bukan dekorasi"
+      }
+    ]
+  }
+}

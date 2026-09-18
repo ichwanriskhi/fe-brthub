@@ -206,7 +206,6 @@ export default function UnitQueuePage() {
                     </span>
                   </div>
                   <Button
-                    variant="outline"
                     size="sm"
                     className="w-full gap-1.5 text-xs"
                     onClick={() => openAssignDialog(ticket.id, ticket.subject, ticket.category)}
@@ -269,7 +268,6 @@ export default function UnitQueuePage() {
                     </TableCell>
                     <TableCell className="px-6 py-3 text-right">
                       <Button
-                        variant="outline"
                         size="sm"
                         className="gap-1.5 text-xs"
                         onClick={() => openAssignDialog(ticket.id, ticket.subject, ticket.category)}

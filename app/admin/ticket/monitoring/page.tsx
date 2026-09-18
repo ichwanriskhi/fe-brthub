@@ -213,7 +213,7 @@ export default function AdminTicketMonitoringPage() {
               className="gap-1.5"
             >
               <ArrowUpRight className="size-3.5 rotate-180" />
-              Kembali ke Monitoring
+              Kembali
             </Button>
           )}
         </div>

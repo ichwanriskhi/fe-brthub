@@ -181,62 +181,103 @@ export default function UnitDashboardPage() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="bg-muted/50 px-6 py-3">ID Tiket</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Subjek</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Tipe</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Prioritas</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Pelapor</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Menunggu</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3 text-right">Aksi</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pendingQueue.slice(0, 5).map((ticket) => (
-                <TableRow key={ticket.id}>
-                  <TableCell className="px-6 py-3 font-mono text-xs whitespace-nowrap">{ticket.id}</TableCell>
-                  <TableCell className="px-6 py-3">
-                    <div className="max-w-[240px] space-y-0.5">
-                      <p className="truncate text-sm font-medium">{ticket.subject}</p>
-                      <p className="truncate text-xs text-muted-foreground">{ticket.category}</p>
-                    </div>
-                  </TableCell>
-                  <TableCell className="px-6 py-3">
-                    <TypeBadge ticketType={ticket.ticketType} />
-                  </TableCell>
-                  <TableCell className="px-6 py-3">
+          <div className="md:hidden border-t">
+            {pendingQueue.slice(0, 5).map((ticket) => (
+              <div key={ticket.id} className="border-b last:border-0 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <p className="font-mono text-xs text-muted-foreground">{ticket.id}</p>
+                    <p className="text-sm font-semibold line-clamp-2">{ticket.subject}</p>
+                    <p className="text-xs text-muted-foreground truncate">{ticket.category}</p>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
                     <PriorityBadge priority={ticket.priority} />
-                  </TableCell>
-                  <TableCell className="px-6 py-3">
-                    <div className="flex items-center gap-2">
-                      <Avatar className="size-8">
-                        <AvatarFallback className="text-xs">
-                          {(ticket.customerData?.name ?? ticket.reporterName).slice(0, 2).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                      <span className="text-sm">{ticket.customerData?.name ?? ticket.reporterName}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="px-6 py-3">
-                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground whitespace-nowrap">
-                      <Clock className="size-3.5" />
-                      1d
-                    </span>
-                  </TableCell>
-                  <TableCell className="px-6 py-3 text-right">
-                    <Button variant="outline" size="sm" asChild className="gap-1.5 text-xs">
-                      <Link href={`/unit/tiket/${ticket.id}`}>
-                        <UserPlus className="size-3.5" />
-                        Assign
-                      </Link>
-                    </Button>
-                  </TableCell>
+                    <TypeBadge ticketType={ticket.ticketType} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Avatar className="size-5 shrink-0">
+                    <AvatarFallback className="text-[10px]">
+                      {(ticket.customerData?.name ?? ticket.reporterName).slice(0, 2).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="text-xs text-muted-foreground truncate flex-1">
+                    {ticket.customerData?.name ?? ticket.reporterName}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                    <Clock className="size-3.5" /> 1d
+                  </span>
+                  <Button variant="outline" size="sm" asChild className="h-7 text-xs px-3 gap-1.5">
+                    <Link href={`/unit/tiket/${ticket.id}`}>
+                      <UserPlus className="size-3.5" />
+                      Assign
+                    </Link>
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="bg-muted/50 px-6 py-3">ID Tiket</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Subjek</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Tipe</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Prioritas</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Pelapor</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Menunggu</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3 text-right">Aksi</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {pendingQueue.slice(0, 5).map((ticket) => (
+                  <TableRow key={ticket.id}>
+                    <TableCell className="px-6 py-3 font-mono text-xs whitespace-nowrap">{ticket.id}</TableCell>
+                    <TableCell className="px-6 py-3">
+                      <div className="max-w-[240px] space-y-0.5">
+                        <p className="truncate text-sm font-medium">{ticket.subject}</p>
+                        <p className="truncate text-xs text-muted-foreground">{ticket.category}</p>
+                      </div>
+                    </TableCell>
+                    <TableCell className="px-6 py-3">
+                      <TypeBadge ticketType={ticket.ticketType} />
+                    </TableCell>
+                    <TableCell className="px-6 py-3">
+                      <PriorityBadge priority={ticket.priority} />
+                    </TableCell>
+                    <TableCell className="px-6 py-3">
+                      <div className="flex items-center gap-2">
+                        <Avatar className="size-8">
+                          <AvatarFallback className="text-xs">
+                            {(ticket.customerData?.name ?? ticket.reporterName).slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="text-sm">{ticket.customerData?.name ?? ticket.reporterName}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="px-6 py-3">
+                      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground whitespace-nowrap">
+                        <Clock className="size-3.5" />
+                        1d
+                      </span>
+                    </TableCell>
+                    <TableCell className="px-6 py-3 text-right">
+                      <Button variant="outline" size="sm" asChild className="gap-1.5 text-xs">
+                        <Link href={`/unit/tiket/${ticket.id}`}>
+                          <UserPlus className="size-3.5" />
+                          Assign
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
 

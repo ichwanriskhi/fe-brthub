@@ -22,7 +22,7 @@ import { Separator } from '@/components/ui/separator';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
-import { UploadCloud, Paperclip, X, Plus, CheckCircle2 } from 'lucide-react';
+import { UploadCloud, Paperclip, X, Plus, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
 import {
   ArrowLeft,
   Building,
@@ -38,12 +38,15 @@ import {
 import { toast } from 'sonner';
 import { ReportDetailModal } from '@/components/shared/ReportDetailModal';
 
+const PROGRESS_SHOW_LIMIT = 3;
+
 export default function HandlerTicketDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const ticket = MOCK_TICKETS.find((t) => t.id === id) || MOCK_TICKETS[0];
   const [chatOpen, setChatOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [progressOpen, setProgressOpen] = useState(false);
+  const [showAllProgress, setShowAllProgress] = useState(false);
 
   // Progres pengerjaan
   const [progressNote, setProgressNote] = useState('');
@@ -95,6 +98,9 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
     }
   };
 
+  const visibleProgress = showAllProgress ? progressList : progressList.slice(0, PROGRESS_SHOW_LIMIT);
+  const hiddenCount = progressList.length - PROGRESS_SHOW_LIMIT;
+
   return (
     <div className="space-y-6 min-w-0">
       {/* Top Bar */}
@@ -102,7 +108,7 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
         <Button variant="ghost" size="sm" asChild className="gap-2 text-muted-foreground hover:text-foreground">
           <Link href="/handler/need-action">
             <ArrowLeft className="size-4" />
-            <span>Kembali ke Antrean</span>
+            <span>Kembali</span>
           </Link>
         </Button>
 
@@ -110,8 +116,8 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
       </div>
 
       {/* Header info */}
-      <Card className="shadow-xs">
-        <CardContent className="space-y-3">
+      <Card>
+        <CardContent className="space-y-4 pt-6">
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 space-y-1">
@@ -134,26 +140,52 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-x-6 gap-y-2 border-t pt-3 text-xs text-muted-foreground">
+          <div className="flex flex-wrap gap-x-6 gap-y-3 border-t pt-4 text-xs text-muted-foreground">
             <div className="flex items-center gap-1.5">
-              <User className="size-4" />
-              <span>Handler: <strong className="text-foreground">{ticket.handlerName ?? '-'}</strong></span>
+              <User className="size-4 text-muted-foreground" />
+              <span>Handler: <strong className="font-semibold text-foreground">{ticket.handlerName ?? '-'}</strong></span>
             </div>
             <div className="flex items-center gap-1.5">
-              <Building className="size-4" />
-              <span>Unit: <strong className="text-foreground">{ticket.assignedUnit ?? '-'}</strong></span>
+              <Building className="size-4 text-muted-foreground" />
+              <span>Unit: <strong className="font-semibold text-foreground">{ticket.assignedUnit ?? '-'}</strong></span>
             </div>
             <div className="flex items-center gap-1.5">
-              <FileText className="size-4" />
-              <span>SO: <strong className="text-foreground">{ticket.soNumber ?? '-'}</strong></span>
+              <FileText className="size-4 text-muted-foreground" />
+              <span>SO: <strong className="font-semibold text-foreground">{ticket.soNumber ?? '-'}</strong></span>
             </div>
             <div className="flex items-center gap-1.5">
-              <User className="size-4" />
-              <span>Pelapor: <strong className="text-foreground">{ticket.reporterName}</strong></span>
+              <User className="size-4 text-muted-foreground" />
+              <span>Pelapor: <strong className="font-semibold text-foreground">{ticket.reporterName}</strong></span>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      {/* ── Revisi 3: Instruksi Penanganan dipindah ke sini (di atas grid) ── */}
+      {handlerAction && (
+        <Card>
+        <CardHeader className="border-b">
+            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+              <Truck className="size-4 text-muted-foreground" />
+              Instruksi Penanganan
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Aksi yang ditetapkan reviewer/unit untuk tiket ini.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-2 rounded-lg border bg-primary/5 p-3.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="secondary" className="gap-1">
+                  <Sparkles className="size-3" />
+                  {handlerAction.label}
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">{handlerAction.description}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 min-w-0">
         {/* Kolom kiri (2/3): progres + resolusi */}
@@ -161,8 +193,8 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
           {/* Progres pengerjaan handler */}
           <Card>
             <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2 text-base font-semibold">
-                {/* <History className="size-4 text-muted-foreground" /> */}
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <History className="size-4 text-muted-foreground" />
                 Progres Pengerjaan
               </CardTitle>
               <CardDescription className="text-xs">
@@ -173,7 +205,7 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
               {progressList.length > 0 && (
                 <div className="relative space-y-4 pl-6">
                   <div className="absolute bottom-1.5 left-[11px] top-1.5 w-px bg-border" />
-                  {progressList.map((p) => (
+                  {visibleProgress.map((p) => (
                     <div key={p.id} className="relative">
                       <div className="absolute -left-[18px] top-1.5 size-2.5 rounded-full border-2 border-primary bg-primary" />
                       <div className="space-y-1.5 rounded-lg border bg-muted/20 p-3">
@@ -199,9 +231,32 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
                 </div>
               )}
 
+              {/* ── Revisi 5: Show More button ── */}
+              {progressList.length > PROGRESS_SHOW_LIMIT && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowAllProgress((v) => !v)}
+                  className="w-full gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  {showAllProgress ? (
+                    <>
+                      <ChevronUp className="size-3.5" />
+                      Sembunyikan
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="size-3.5" />
+                      Tampilkan {hiddenCount} progres lainnya
+                    </>
+                  )}
+                </Button>
+              )}
+
               {progressOpen && (
                 <>
                   <Separator />
+                  {/* ── Revisi 6: Fix button height di mobile ── */}
                   <div className="space-y-3 rounded-lg border border-dashed bg-background p-3.5">
                     <span className="text-xs font-semibold text-foreground block">Tambah Progres Pengerjaan</span>
                     <Textarea
@@ -210,7 +265,7 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
                       placeholder="Contoh: Hari ini koordinasi dengan warehouse untuk cek stok barang pengganti..."
                       className="min-h-20 text-xs"
                     />
-                    <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       <input
                         type="file"
                         multiple
@@ -218,15 +273,15 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
                         hidden
                         id="progress-upload"
                       />
-                      <label htmlFor="progress-upload" className="flex-1">
-                        <Button variant="outline" size="sm" className="w-full gap-1.5 text-xs" asChild>
+                      <label htmlFor="progress-upload" className="contents">
+                        <Button variant="outline" size="sm" className="h-9 w-full gap-1.5 text-xs" asChild>
                           <span>
                             <UploadCloud className="size-3.5" />
                             {progressFiles.length > 0 ? `${progressFiles.length} file dipilih` : 'Unggah Bukti'}
                           </span>
                         </Button>
                       </label>
-                      <Button size="sm" onClick={submitProgress} className="flex-1 gap-1.5 text-xs">
+                      <Button size="sm" onClick={submitProgress} className="h-9 w-full gap-1.5 text-xs">
                         <Send className="size-3.5" />
                         Simpan Progres
                       </Button>
@@ -265,8 +320,8 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
           {ticket.status !== 'CLOSED' && (
             <Card>
               <CardHeader className="border-b">
-                <CardTitle className="flex items-center gap-2 text-base font-semibold">
-                  {/* <CheckCircle2 className="size-4 text-green-500" /> */}
+                <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                  <Send className="size-4 text-muted-foreground" />
                   Ajukan Resolusi
                 </CardTitle>
                 <CardDescription className="text-xs">
@@ -275,7 +330,10 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
               </CardHeader>
               <CardContent className="space-y-4">
                 <Field>
-                  <FieldLabel>Ringkasan Solusi *</FieldLabel>
+                  <FieldLabel>
+                    Ringkasan Solusi
+                    <span className="text-red-500 ml-0.5">*</span>
+                  </FieldLabel>
                   <Textarea
                     value={resolutionSummary}
                     onChange={(e) => setResolutionSummary(e.target.value)}
@@ -284,7 +342,10 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
                   />
                 </Field>
                 <Field>
-                  <FieldLabel>Detail Pelaksanaan *</FieldLabel>
+                  <FieldLabel>
+                    Detail Pelaksanaan
+                    <span className="text-red-500 ml-0.5">*</span>
+                  </FieldLabel>
                   <Textarea
                     value={resolutionDetail}
                     onChange={(e) => setResolutionDetail(e.target.value)}
@@ -301,39 +362,16 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
           )}
         </div>
 
-        {/* Kolom kanan (1/3): instruksi penanganan */}
+        {/* Kolom kanan (1/3): riwayat revisi */}
         <div className="flex flex-col gap-6 min-w-0">
-          {/* Instruksi aksi handler */}
-          {handlerAction && (
-            <Card>
-              <CardHeader className="border-b">
-                <CardTitle className="flex items-center gap-2 text-base font-semibold">
-                  <Truck className="size-4 text-primary" />
-                  Instruksi Penanganan
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Aksi yang ditetapkan reviewer/unit untuk tiket ini.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-col gap-2 rounded-lg border bg-primary/5 p-3.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="secondary" className="gap-1">
-                      <Sparkles className="size-3" />
-                      {handlerAction.label}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">{handlerAction.description}</p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
           {/* Riwayat revisi (jika ada) */}
           {(ticket.resolutionCycles ?? []).filter((c) => !c.isCurrent).length > 0 && (
             <Card>
               <CardHeader className="border-b">
-                <CardTitle className="text-sm font-semibold">Riwayat Revisi</CardTitle>
+                <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                  <History className="size-4 text-muted-foreground" />
+                  Riwayat Revisi
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4 border-l-2 ml-2 pl-4">

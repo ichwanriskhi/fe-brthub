@@ -13,6 +13,7 @@ import { Separator } from '@/components/ui/separator';
 import {
   ArrowLeft,
   Building,
+  ClipboardCheck,
   FileText,
   Paperclip,
   CheckCircle2,
@@ -21,12 +22,13 @@ import {
   User,
   Phone,
   MapPin,
-  ClipboardCheck,
   FileOutput,
   RefreshCwIcon,
   Clock,
   History,
   Hammer,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 const STAGES = [
@@ -52,6 +54,9 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
   const { id } = use(params);
   const ticket = MOCK_TICKETS.find(t => t.id === id) || MOCK_TICKETS[0];
   const [chatOpen, setChatOpen] = useState(false);
+  const [showAllProgress, setShowAllProgress] = useState(false);
+
+  const PROGRESS_SHOW_LIMIT = 3;
 
   const currentStageIndex = getStageIndex(ticket.status);
   const isRejected = ticket.status === 'REJECTED';
@@ -65,7 +70,7 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
         <Button variant="ghost" size="sm" asChild className="gap-2 text-muted-foreground hover:text-foreground">
           <Link href="/laporan">
             <ArrowLeft className="size-4" />
-            <span>Kembali ke Riwayat</span>
+            <span>Kembali</span>
           </Link>
         </Button>
 
@@ -84,36 +89,34 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
       </div>
 
       {/* ── Header Info ── */}
-      <Card className="shadow-xs">
-        <CardContent className="pt-6 space-y-4">
+      <Card>
+        <CardContent className="space-y-4 pt-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
+            <div className="min-w-0 space-y-1">
+              <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
                 <span className="font-semibold text-foreground">{ticket.id}</span>
                 <span>•</span>
                 <span>{new Date(ticket.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
               </div>
-              <h1 className="text-xl md:text-2xl font-bold tracking-tight text-foreground">
-                {ticket.subject}
-              </h1>
+              <h1 className="text-xl font-bold tracking-tight md:text-2xl">{ticket.subject}</h1>
             </div>
             <div className="flex items-center gap-2">
               <StatusBadge status={ticket.status} />
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-muted-foreground pt-3 border-t">
+          <div className="flex flex-wrap gap-x-6 gap-y-3 border-t pt-4 text-xs text-muted-foreground">
             <div className="flex items-center gap-1.5">
-              <Building className="size-3.5 text-muted-foreground" />
-              <span>Pelanggan: <strong className="text-foreground">{ticket.customerData?.name || ticket.reporterName}</strong></span>
+              <Building className="size-4 text-muted-foreground" />
+              <span>Pelanggan: <strong className="font-semibold text-foreground">{ticket.customerData?.name || ticket.reporterName}</strong></span>
             </div>
             <div className="flex items-center gap-1.5">
-              <FileText className="size-3.5 text-muted-foreground" />
-              <span>SO: <strong className="text-foreground">{ticket.soNumber || '-'}</strong></span>
+              <FileText className="size-4 text-muted-foreground" />
+              <span>SO: <strong className="font-semibold text-foreground">{ticket.soNumber || '-'}</strong></span>
             </div>
             <div className="flex items-center gap-1.5">
-              <User className="size-3.5 text-muted-foreground" />
-              <span>Pelapor: <strong className="text-foreground">{ticket.reporterName}</strong></span>
+              <User className="size-4 text-muted-foreground" />
+              <span>Pelapor: <strong className="font-semibold text-foreground">{ticket.reporterName}</strong></span>
             </div>
           </div>
         </CardContent>
@@ -121,8 +124,11 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
 
       {/* ── Status Stepper Timeline ── */}
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base font-semibold">Progres Penanganan Tiket</CardTitle>
+        <CardHeader className="border-b">
+          <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+            <ClipboardCheck className="size-4 text-muted-foreground" />
+            Progres Penanganan Tiket
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {isRejected ? (
@@ -182,22 +188,20 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
       {/* ── Progres Pengerjaan Handler (timeline) ── */}
       {ticket.handlerProgress && ticket.handlerProgress.length > 0 && (
         <Card>
-          <CardHeader className="pb-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <Hammer className="size-4 text-primary" />
-              <CardTitle className="text-base font-semibold">Progres Pengerjaan Handler</CardTitle>
-              {ticket.handlerName && (
-                <Badge variant="secondary" className="ml-auto text-xs">
-                  {ticket.handlerName}
-                </Badge>
-              )}
-            </div>
+          <CardHeader className="border-b">
+            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+              <Hammer className="size-4 text-muted-foreground" />
+              Progres Pengerjaan Handler
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="relative space-y-4 pl-6">
               {/* Vertical line */}
               <div className="absolute left-[11px] top-1.5 bottom-1.5 w-px bg-border" />
-              {ticket.handlerProgress.map((p) => (
+              {(showAllProgress
+                ? ticket.handlerProgress
+                : ticket.handlerProgress.slice(0, PROGRESS_SHOW_LIMIT)
+              ).map((p) => (
                 <div key={p.id} className="relative">
                   {/* Dot */}
                   <div className="absolute left-[-18px] top-1.5 size-2.5 rounded-full border-2 border-primary bg-primary" />
@@ -233,6 +237,19 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
                 </div>
               ))}
             </div>
+            {/* ── Show More button ── */}
+            {ticket.handlerProgress.length > PROGRESS_SHOW_LIMIT && (
+              <button
+                onClick={() => setShowAllProgress((v) => !v)}
+                className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed py-2 text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground transition-colors"
+              >
+                {showAllProgress ? (
+                  <><ChevronUp className="size-3.5" /> Sembunyikan</>
+                ) : (
+                  <><ChevronDown className="size-3.5" /> Tampilkan {ticket.handlerProgress.length - PROGRESS_SHOW_LIMIT} progres lainnya</>
+                )}
+              </button>
+            )}
           </CardContent>
         </Card>
       )}
@@ -242,10 +259,12 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
       {/* ════════════════════════════════════════ */}
       {hasResolution && (
         <Card>
-          <CardHeader className="pb-3">
+          <CardHeader className="border-b">
             <div className="flex items-center gap-2">
-              <ClipboardCheck className="size-5 text-emerald-600" />
-              <CardTitle className="text-base font-semibold">Hasil Resolusi</CardTitle>
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <ClipboardCheck className="size-4 text-muted-foreground" />
+                Hasil Resolusi
+              </CardTitle>
               {ticket.handlerName && (
                 <Badge variant="secondary" className="ml-auto text-xs">
                   Oleh: {ticket.handlerName}
@@ -380,8 +399,11 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
       <div className="grid md:grid-cols-3 gap-6">
         {/* Detail Rincian (2/3) */}
         <Card className="md:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold">Rincian Laporan</CardTitle>
+          <CardHeader className="border-b">
+            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+              <FileText className="size-4 text-muted-foreground" />
+              Rincian Laporan
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4 text-xs">
@@ -440,8 +462,11 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
         {/* Sidebar (1/3) */}
         <div className="space-y-6">
           <Card className="bg-muted/20 border-dashed">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold">Diskusi / Bantuan Laporan</CardTitle>
+            <CardHeader className="border-b">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <MessageSquare className="size-4 text-muted-foreground" />
+                Diskusi / Bantuan Laporan
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <p className="text-xs text-muted-foreground leading-relaxed">
@@ -458,8 +483,11 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
           </Card>
 
           <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold">Informasi Kontak Pelapor</CardTitle>
+            <CardHeader className="border-b">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <User className="size-4 text-muted-foreground" />
+                Informasi Kontak Pelapor
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2.5 text-xs text-muted-foreground">
               <div className="flex items-center justify-between">

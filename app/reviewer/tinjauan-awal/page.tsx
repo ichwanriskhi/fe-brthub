@@ -151,7 +151,7 @@ export default function TinjauanAwalPage() {
                     <StatusBadge status={ticket.status} />
                   </TableCell>
                   <TableCell className="px-6 py-3">
-                    <Button variant="outline" size="sm" asChild>
+                    <Button size="sm" asChild>
                       <Link href={`/reviewer/tiket/${ticket.id}`}>
                         Verifikasi
                         <ChevronRight data-icon="inline-end" />

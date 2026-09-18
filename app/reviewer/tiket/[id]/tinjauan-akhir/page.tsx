@@ -38,6 +38,7 @@ import {
   Paperclip,
   History,
   ShieldCheck,
+  ClipboardCheck,
 } from 'lucide-react';
 
 export default function ResolutionReviewPage({ params }: { params: Promise<{ id: string }> }) {
@@ -80,7 +81,7 @@ export default function ResolutionReviewPage({ params }: { params: Promise<{ id:
         <Button variant="ghost" size="sm" asChild className="gap-2 text-muted-foreground hover:text-foreground">
           <Link href="/reviewer/tinjauan-akhir">
             <ArrowLeft className="size-4" />
-            <span>Kembali ke Antrean</span>
+            <span>Kembali</span>
           </Link>
         </Button>
 
@@ -96,38 +97,61 @@ export default function ResolutionReviewPage({ params }: { params: Promise<{ id:
 
       {/* Brief Header */}
       <Card>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-4 pt-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
-                <span>{ticket.id}</span>
+            <div className="min-w-0 space-y-1">
+              <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
+                <span className="font-semibold text-foreground">{ticket.id}</span>
                 <span>•</span>
                 <span>{new Date(ticket.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
               </div>
-              <h1 className="text-xl md:text-2xl font-bold text-foreground mt-1">{ticket.subject}</h1>
+              <h1 className="text-xl font-bold tracking-tight md:text-2xl">{ticket.subject}</h1>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-                        <TypeBadge ticketType={ticket.ticketType} />
-                        <PriorityBadge priority={ticket.priority} />
-                        <StatusBadge status={ticket.status} />
-                        {handlerActionLabel && (
-                          <Badge variant="secondary" className="gap-1">
-                            <Truck className="size-3" />
-                            {handlerActionLabel}
-                          </Badge>
-                        )}
-                        <Button variant="outline" size="sm" onClick={() => setReportOpen(true)} className="gap-1.5">
-                          <FileText className="size-3.5" />
-                          <span>Detail Laporan</span>
-                        </Button>
-                      </div>
+              <TypeBadge ticketType={ticket.ticketType} />
+              <PriorityBadge priority={ticket.priority} />
+              <StatusBadge status={ticket.status} />
+              {handlerActionLabel && (
+                <Badge variant="secondary" className="gap-1">
+                  <Truck className="size-3" />
+                  {handlerActionLabel}
+                </Badge>
+              )}
+              <Button variant="outline" size="sm" onClick={() => setReportOpen(true)} className="gap-1.5">
+                <FileText className="size-3.5" />
+                <span>Detail Laporan</span>
+              </Button>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-muted-foreground pt-2 border-t">
-            <span>Pelapor: {ticket.reporterName}</span>
-            {ticket.soNumber && <span>SO: {ticket.soNumber}</span>}
-            {ticket.salesName && <span>Sales: {ticket.salesName}</span>}
-            {ticket.assignedUnit && <span>Unit: {ticket.assignedUnit}</span>}
-            {ticket.handlerName && <span>Handler: {ticket.handlerName}</span>}
+          <div className="flex flex-wrap gap-x-6 gap-y-3 border-t pt-4 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1.5">
+              <User className="size-4 text-muted-foreground" />
+              <span>Pelapor: <strong className="font-semibold text-foreground">{ticket.reporterName}</strong></span>
+            </div>
+            {ticket.soNumber && (
+              <div className="flex items-center gap-1.5">
+                <FileText className="size-4 text-muted-foreground" />
+                <span>SO: <strong className="font-semibold text-foreground">{ticket.soNumber}</strong></span>
+              </div>
+            )}
+            {ticket.salesName && (
+              <div className="flex items-center gap-1.5">
+                <User className="size-4 text-muted-foreground" />
+                <span>Sales: <strong className="font-semibold text-foreground">{ticket.salesName}</strong></span>
+              </div>
+            )}
+            {ticket.assignedUnit && (
+              <div className="flex items-center gap-1.5">
+                <Building className="size-4 text-muted-foreground" />
+                <span>Unit: <strong className="font-semibold text-foreground">{ticket.assignedUnit}</strong></span>
+              </div>
+            )}
+            {ticket.handlerName && (
+              <div className="flex items-center gap-1.5">
+                <User className="size-4 text-muted-foreground" />
+                <span>Handler: <strong className="font-semibold text-foreground">{ticket.handlerName}</strong></span>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -139,8 +163,8 @@ export default function ResolutionReviewPage({ params }: { params: Promise<{ id:
           {(ticket.handlerProgress && ticket.handlerProgress.length > 0) && (
             <Card>
               <CardHeader className="border-b">
-                <CardTitle className="flex items-center gap-2 text-base font-semibold">
-                  {/* <History className="size-4 text-muted-foreground" /> */}
+                <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                  <History className="size-4 text-muted-foreground" />
                   Progres Pengerjaan Handler
                 </CardTitle>
                 <CardDescription className="text-xs">
@@ -183,7 +207,8 @@ export default function ResolutionReviewPage({ params }: { params: Promise<{ id:
             <CardHeader className="border-b">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <CardTitle className="text-base font-semibold">
+                  <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                    <ClipboardCheck className="size-4 text-muted-foreground" />
                     Resolusi Diajukan Handler {currentCycle ? `#${currentCycle.cycleNumber}` : ''}
                   </CardTitle>
                   <CardDescription className="text-xs">
@@ -235,8 +260,11 @@ export default function ResolutionReviewPage({ params }: { params: Promise<{ id:
             <Card>
               <CardHeader className="border-b">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-base font-semibold">Riwayat Revisi</CardTitle>
-                  <Badge variant="secondary">{cycles.length} siklus</Badge>
+                  <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                    <RotateCcw className="size-4 text-muted-foreground" />
+                    Riwayat Revisi
+                  </CardTitle>
+                  <Badge variant="secondary" className="text-xs">{cycles.length} siklus</Badge>
                 </div>
               </CardHeader>
               <CardContent>
@@ -268,9 +296,9 @@ export default function ResolutionReviewPage({ params }: { params: Promise<{ id:
         <div className="space-y-6 min-w-0">
           <Card>
             <CardHeader className="border-b">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <FileCheck className="size-4 text-primary" />
-                <span>Verifikasi Solusi</span>
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <FileCheck className="size-4 text-muted-foreground" />
+                Verifikasi Solusi
               </CardTitle>
               <CardDescription className="text-xs">
                 Apakah solusi handler sudah tepat & sesuai laporan?

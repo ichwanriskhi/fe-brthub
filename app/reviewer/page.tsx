@@ -39,7 +39,6 @@ export default function ReviewerDashboardPage() {
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <CardTitle>Perlu Tindakan Segera</CardTitle>
-              <CardDescription>5 tiket teratas di antrean verifikasi dan persetujuan</CardDescription>
             </div>
             <Button variant="outline" size="sm" asChild>
               <Link href="/reviewer/tinjauan-awal">
@@ -50,6 +49,40 @@ export default function ReviewerDashboardPage() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
+          <div className="md:hidden border-t">
+            {urgentQueue.map((ticket) => (
+              <div key={ticket.id} className="border-b last:border-0 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <p className="font-mono text-xs text-muted-foreground">{ticket.id}</p>
+                    <p className="text-sm font-semibold line-clamp-2">{ticket.subject}</p>
+                    <p className="text-xs text-muted-foreground truncate">SO: {ticket.soNumber ?? '-'}</p>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    <TypeBadge ticketType={ticket.ticketType} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Avatar className="size-5 shrink-0">
+                    <AvatarFallback className="text-[10px]">
+                      {(ticket.customerData?.name ?? ticket.reporterName).slice(0, 2).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="text-xs text-muted-foreground truncate flex-1">
+                    {ticket.customerData?.name ?? ticket.reporterName}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <StatusBadge status={ticket.status} />
+                  <Button size="sm" asChild className="h-7 text-xs px-3">
+                    <Link href={`/reviewer/tiket/${ticket.id}`}>Tinjau</Link>
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden md:block">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -88,7 +121,7 @@ export default function ReviewerDashboardPage() {
                       <StatusBadge status={ticket.status} />
                     </TableCell>
                     <TableCell className="px-6 py-3">
-                      <Button variant="ghost" size="sm" asChild className="gap-1 text-xs">
+                      <Button size="sm" asChild className="gap-1 text-xs">
                         <Link href={`/reviewer/tiket/${ticket.id}`}>
                           Tinjau
                           <ArrowUpRight className="size-3.5" />
@@ -99,6 +132,7 @@ export default function ReviewerDashboardPage() {
                 ))}
               </TableBody>
             </Table>
+          </div>
         </CardContent>
       </Card>
     </div>

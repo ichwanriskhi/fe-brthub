@@ -55,7 +55,7 @@ export function TicketCardList({ tickets, actionLabel, hrefBase, meta }: TicketC
                 )}
               </div>
 
-              <Button variant="outline" size="sm" className="w-full justify-between" asChild>
+              <Button size="sm" className="w-full justify-between" asChild>
                 <Link href={`${hrefBase}/${ticket.id}`}>
                   <span>{actionLabel}</span>
                   <ChevronRight data-icon="inline-end" />

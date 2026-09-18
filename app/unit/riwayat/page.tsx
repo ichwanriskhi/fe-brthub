@@ -149,7 +149,7 @@ export default function UnitHistoryPage() {
                       </Badge>
                     </div>
                   </div>
-                  <Button variant="outline" size="sm" className="w-full justify-between" asChild>
+                  <Button size="sm" className="w-full justify-between" asChild>
                     <Link href={`/unit/tiket/${row.ticketId}`}>
                       <span>Detail Tiket</span>
                       <ChevronRight data-icon="inline-end" />
@@ -208,7 +208,7 @@ export default function UnitHistoryPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="px-6 py-3 text-right">
-                      <Button variant="ghost" size="sm" asChild className="gap-1 text-xs">
+                      <Button size="sm" asChild className="gap-1 text-xs">
                         <Link href={`/unit/tiket/${row.ticketId}`}>
                           Detail
                           <ArrowUpRight className="size-3.5" />

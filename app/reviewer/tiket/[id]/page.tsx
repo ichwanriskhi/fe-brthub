@@ -28,6 +28,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   ArrowLeft,
+  FileText,
   Paperclip,
   CheckCircle2,
   XCircle,
@@ -36,7 +37,19 @@ import {
   Truck,
   Info,
   Sparkles,
+  User,
+  Building,
 } from 'lucide-react';
+
+// ── Revisi 4: Daftar jabatan pengganti workflow berbasis prioritas ──
+const WORKFLOW_OPTIONS = [
+  { value: 'Direksi', label: 'Direksi', description: 'Eskalasi ke level Direksi perusahaan.' },
+  { value: 'General Manager', label: 'General Manager', description: 'Diteruskan ke General Manager terkait.' },
+  { value: 'Operational Manager', label: 'Operational Manager', description: 'Ditangani oleh Operational Manager.' },
+  { value: 'Division', label: 'Division', description: 'Diteruskan ke divisi/unit yang bertanggung jawab.' },
+] as const;
+
+type WorkflowTarget = typeof WORKFLOW_OPTIONS[number]['value'];
 
 export default function ReviewerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -50,18 +63,17 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
   const [description, setDescription] = useState(ticket.description);
   const [priority, setPriority] = useState(ticket.priority);
   const [tipeTiket, setTipeTiket] = useState<TicketType>(ticket.ticketType);
-  const [routingUnit, setRoutingUnit] = useState<string>(ROUTING_UNITS[0]);
-  const [handler, setHandler] = useState<string>(HANDLERS[0].name);
   const [handlerAction, setHandlerAction] = useState<string>('');
   const [chatOpen, setChatOpen] = useState(false);
-    const [actionDone, setActionDone] = useState<string | null>(null);
+  const [actionDone, setActionDone] = useState<string | null>(null);
+
+  // ── Revisi 4: state workflow jabatan (menggantikan routing berbasis prioritas) ──
+  const [workflowTarget, setWorkflowTarget] = useState<WorkflowTarget>('Division');
 
   const isClaim = isDistributionClaim(category);
-  const isPriorityC = priority === 'C';
 
   const recommendedAction = HANDLER_ACTIONS.find((a) => (a.recommendedFor as readonly string[]).includes(subcategory));
   const availableActions = HANDLER_ACTIONS;
-  const selectedHandlerObj = HANDLERS.find((h) => h.name === handler);
 
   const handleCategoryChange = (value: string) => {
     setCategory(value);
@@ -69,8 +81,7 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
   };
 
   const handleSubmit = () => {
-    const target = isPriorityC ? `handler ${handler}` : `unit ${routingUnit}`;
-    setActionDone(`Tinjauan awal disimpan — tiket diteruskan ke ${target}.`);
+    setActionDone(`Tinjauan awal disimpan — tiket diteruskan ke ${workflowTarget}.`);
     setTimeout(() => router.push('/reviewer/tinjauan-awal'), 1500);
   };
 
@@ -86,7 +97,7 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
         <Button variant="ghost" size="sm" asChild className="gap-2 text-muted-foreground hover:text-foreground">
           <Link href="/reviewer/tinjauan-awal">
             <ArrowLeft className="size-4" />
-            <span>Kembali ke Antrean</span>
+            <span>Kembali</span>
           </Link>
         </Button>
 
@@ -102,27 +113,45 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
 
       {/* Ticket Brief Header */}
       <Card>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-4 pt-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
-                <span>{ticket.id}</span>
+            <div className="min-w-0 space-y-1">
+              <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
+                <span className="font-semibold text-foreground">{ticket.id}</span>
                 <span>•</span>
                 <span>{new Date(ticket.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
               </div>
-              <h1 className="text-xl md:text-2xl font-bold text-foreground mt-1">{subject}</h1>
+              <h1 className="text-xl font-bold tracking-tight md:text-2xl">{subject}</h1>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <TypeBadge ticketType={ticket.ticketType} />
               <StatusBadge status={ticket.status} />
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-muted-foreground pt-2 border-t">
-            <span>Pelapor: {ticket.reporterName} ({ticket.reporterPhone})</span>
-            {ticket.soNumber && <span>SO: {ticket.soNumber}</span>}
-            {ticket.salesName && <span>Sales: {ticket.salesName}</span>}
-            {ticket.customerData?.name && <span>Customer: {ticket.customerData.name}</span>}
+          <div className="flex flex-wrap gap-x-6 gap-y-3 border-t pt-4 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1.5">
+              <User className="size-4 text-muted-foreground" />
+              <span>Pelapor: <strong className="font-semibold text-foreground">{ticket.reporterName} ({ticket.reporterPhone})</strong></span>
+            </div>
+            {ticket.soNumber && (
+              <div className="flex items-center gap-1.5">
+                <FileText className="size-4 text-muted-foreground" />
+                <span>SO: <strong className="font-semibold text-foreground">{ticket.soNumber}</strong></span>
+              </div>
+            )}
+            {ticket.salesName && (
+              <div className="flex items-center gap-1.5">
+                <User className="size-4 text-muted-foreground" />
+                <span>Sales: <strong className="font-semibold text-foreground">{ticket.salesName}</strong></span>
+              </div>
+            )}
+            {ticket.customerData?.name && (
+              <div className="flex items-center gap-1.5">
+                <Building className="size-4 text-muted-foreground" />
+                <span>Customer: <strong className="font-semibold text-foreground">{ticket.customerData.name}</strong></span>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -133,20 +162,29 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
           {/* Data yang bisa diedit reviewer */}
           <Card>
             <CardHeader className="border-b">
-              <CardTitle className="text-base font-semibold">Data Laporan (Salinan Kerja)</CardTitle>
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <FileText className="size-4 text-muted-foreground" />
+                Data Laporan (Salinan Kerja)
+              </CardTitle>
               <CardDescription className="text-xs">
                 Reviewer dapat mengoreksi data laporan sebelum diteruskan. Data asli pelapor tersimpan di riwayat.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <label className="text-xs font-semibold text-foreground block mb-1">Subjek</label>
+                <label className="text-xs font-semibold text-foreground block mb-1">
+                  Subjek
+                  <span className="text-red-500 ml-0.5">*</span>
+                </label>
                 <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-semibold text-foreground block mb-1">Tipe Tiket</label>
+                  <label className="text-xs font-semibold text-foreground block mb-1">
+                    Tipe Tiket
+                    <span className="text-red-500 ml-0.5">*</span>
+                  </label>
                   <Select value={tipeTiket} onValueChange={(v) => setTipeTiket(v ?? 'COMPLAINT')} items={[
                   { value: 'REQUEST', label: 'Request' },
                   { value: 'INCIDENT', label: 'Incident' },
@@ -165,7 +203,10 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
                   </Select>
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-foreground block mb-1">Kategori</label>
+                  <label className="text-xs font-semibold text-foreground block mb-1">
+                    Kategori
+                    <span className="text-red-500 ml-0.5">*</span>
+                  </label>
                   <Select
                     value={category}
                     onValueChange={(v) => handleCategoryChange(v ?? CATEGORIES[0])}
@@ -182,7 +223,10 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
                   </Select>
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-foreground block mb-1">Sub Kategori</label>
+                  <label className="text-xs font-semibold text-foreground block mb-1">
+                    Sub Kategori
+                    <span className="text-red-500 ml-0.5">*</span>
+                  </label>
                   <Select
                     value={subcategory}
                     onValueChange={(v) => setSubcategory(v ?? SUBCATEGORY_MAP[category][0])}
@@ -201,7 +245,10 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-foreground block mb-1">Deskripsi / Ruang Lingkup</label>
+                <label className="text-xs font-semibold text-foreground block mb-1">
+                  Deskripsi / Ruang Lingkup
+                  <span className="text-red-500 ml-0.5">*</span>
+                </label>
                 <Textarea value={description} onChange={(e) => setDescription(e.target.value)} className="min-h-24" />
               </div>
 
@@ -244,25 +291,58 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
         <div className="space-y-6 min-w-0">
           <Card>
             <CardHeader className="border-b">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
                 <ShieldCheck className="size-4 text-primary" />
-                <span>Triage & Routing</span>
+                Triage & Routing
               </CardTitle>
               <CardDescription className="text-xs">
                 Tentukan prioritas dan tujuan penerusan tiket.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Prioritas */}
+              {/* ── Revisi 4: Tujuan Approval/Eskalasi (menggantikan routing berbasis prioritas) ── */}
               <div>
-                <label className="text-xs font-semibold text-foreground block mb-1">Tingkat Prioritas</label>
-                <Select value={priority} onValueChange={(v) => setPriority(v as TicketPriority)} items={[
+                <label className="text-xs font-semibold text-foreground block mb-2">
+                  Tujuan Approval / Eskalasi
+                  <span className="text-red-500 ml-0.5">*</span>
+                </label>
+                <RadioGroup
+                  value={workflowTarget}
+                  onValueChange={(v) => setWorkflowTarget(v as WorkflowTarget)}
+                  className="gap-2"
+                >
+                  {WORKFLOW_OPTIONS.map((opt) => {
+                    const selected = workflowTarget === opt.value;
+                    return (
+                      <label
+                        key={opt.value}
+                        data-checked={selected || undefined}
+                        className="flex w-full cursor-pointer flex-col rounded-lg border border-border p-3 transition-colors hover:bg-accent data-checked:border-primary data-checked:bg-primary/10 dark:border-input"
+                      >
+                        <div className="flex items-center gap-2">
+                          <RadioGroupItem value={opt.value} />
+                          <span className="text-sm font-semibold">{opt.label}</span>
+                        </div>
+                        <p className="mt-1 ml-6 text-xs text-muted-foreground">{opt.description}</p>
+                      </label>
+                    );
+                  })}
+                </RadioGroup>
+              </div>
+
+              {/* Prioritas — tetap ada untuk menandai urgensi */}
+              <div>
+                <label className="text-xs font-semibold text-foreground block mb-1">
+                  Tingkat Prioritas
+                  <span className="text-red-500 ml-0.5">*</span>
+                </label>
+                <Select value={priority ?? ''} onValueChange={(v) => setPriority(v as TicketPriority)} items={[
                   { value: 'A', label: 'Prioritas A (Critical)' },
                   { value: 'B', label: 'Prioritas B (High)' },
                   { value: 'C', label: 'Prioritas C (Normal)' },
                 ]}>
                   <SelectTrigger className="w-full">
-                    <SelectValue />
+                    <SelectValue placeholder="Pilih prioritas..." />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="A">Prioritas A (Critical)</SelectItem>
@@ -272,7 +352,7 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
                 </Select>
                 <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1.5">
                   <Info className="size-3.5 shrink-0" />
-                  {priority ? PRIORITY_INFO[priority] : 'Prioritas belum ditentukan — pilih tingkat urgensi untuk melanjutkan tiket.'}
+                  {priority ? PRIORITY_INFO[priority] : 'Prioritas belum ditentukan — pilih tingkat urgensi masalah.'}
                 </p>
               </div>
 
@@ -312,36 +392,6 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
                 </div>
               )}
 
-              {/* Routing: unit (A/B) atau handler (C) */}
-              <div>
-                <label className="text-xs font-semibold text-foreground block mb-1">
-                  {isPriorityC ? 'Assign Handler' : 'Unit / Departemen Tujuan'}
-                </label>
-                {isPriorityC ? (
-                  <Select value={handler} onValueChange={(v) => setHandler(v ?? HANDLERS[0].name)} items={HANDLERS.map((h) => ({ value: h.name, label: `${h.name} — ${h.unit}` }))}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {HANDLERS.map((h) => (
-                        <SelectItem key={h.id} value={h.name}>{h.name} — {h.unit}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Select value={routingUnit} onValueChange={(v) => setRoutingUnit(v ?? ROUTING_UNITS[0])} items={ROUTING_UNITS.map((u) => ({ value: u, label: u }))}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ROUTING_UNITS.map((u) => (
-                        <SelectItem key={u} value={u}>{u}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-
               {/* Ringkasan keputusan */}
               <div className="rounded-lg border bg-muted/40 p-3 space-y-2 text-xs">
                 <div className="text-[10px] font-semibold uppercase text-muted-foreground tracking-wider">
@@ -350,45 +400,32 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
                     <span className="block text-muted-foreground">Prioritas</span>
-                    <span className="font-semibold">{priority ?? "Belum ditentukan"}</span>
+                    <span className="font-semibold">{priority ?? 'Belum ditentukan'}</span>
+                  </div>
+                  <div>
+                    <span className="block text-muted-foreground">Tujuan Eskalasi</span>
+                    <span className="font-semibold">{workflowTarget}</span>
                   </div>
                   {isClaim && (
-                    <div>
+                    <div className="col-span-2">
                       <span className="block text-muted-foreground">Aksi Handler</span>
                       <span className="font-semibold">
                         {HANDLER_ACTIONS.find((a) => a.id === handlerAction)?.label ?? '-'}
                       </span>
                     </div>
                   )}
-                  <div className="col-span-2">
-                    <span className="block text-muted-foreground">{isPriorityC ? 'Handler' : 'Tujuan'}</span>
-                    <span className="font-semibold">
-                      {isPriorityC ? `${handler} (${selectedHandlerObj?.unit})` : routingUnit}
-                    </span>
-                  </div>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
                 <Button onClick={handleSubmit} className="flex-1 text-xs font-semibold gap-2">
-                  <span>{isPriorityC ? 'Assign Handler' : 'Teruskan Tiket'}</span>
+                  <span>Teruskan Tiket</span>
                 </Button>
                 <Button onClick={handleReject} variant="destructive" className="text-xs font-semibold gap-2">
                   <XCircle className="size-4" />
                   <span>Tolak</span>
                 </Button>
               </div>
-
-              {/* <Separator />
-
-              <Button
-                onClick={() => setChatOpen(true)}
-                variant="ghost"
-                className="w-full text-xs text-muted-foreground hover:text-foreground justify-center gap-2"
-              >
-                <MessageSquare className="size-4 text-primary" />
-                <span>Buka Diskusi dengan Reporter</span>
-              </Button> */}
             </CardContent>
           </Card>
         </div>

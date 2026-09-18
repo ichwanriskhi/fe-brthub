@@ -59,14 +59,14 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
         <Button variant="ghost" size="sm" asChild className="gap-2 text-muted-foreground hover:text-foreground">
           <Link href="/unit/antrean">
             <ArrowLeft className="size-4" />
-            <span>Kembali ke Antrean</span>
+            <span>Kembali</span>
           </Link>
         </Button>
         <TicketChatDrawer ticketId={ticket.id} />
       </div>
 
       {/* Header info */}
-      <Card className="shadow-xs">
+      <Card>
         <CardContent className="space-y-4 pt-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 space-y-1">
@@ -84,18 +84,18 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-x-6 gap-y-2 border-t pt-3 text-xs text-muted-foreground">
+          <div className="flex flex-wrap gap-x-6 gap-y-3 border-t pt-4 text-xs text-muted-foreground">
             <div className="flex items-center gap-1.5">
-              <Building className="size-3.5" />
-              <span>Pelanggan: <strong className="text-foreground">{ticket.customerData?.name ?? ticket.reporterName}</strong></span>
+              <Building className="size-4 text-muted-foreground" />
+              <span>Pelanggan: <strong className="font-semibold text-foreground">{ticket.customerData?.name ?? ticket.reporterName}</strong></span>
             </div>
             <div className="flex items-center gap-1.5">
-              <FileText className="size-3.5" />
-              <span>SO: <strong className="text-foreground">{ticket.soNumber ?? '-'}</strong></span>
+              <FileText className="size-4 text-muted-foreground" />
+              <span>SO: <strong className="font-semibold text-foreground">{ticket.soNumber ?? '-'}</strong></span>
             </div>
             <div className="flex items-center gap-1.5">
-              <User className="size-3.5" />
-              <span>Pelapor: <strong className="text-foreground">{ticket.reporterName}</strong></span>
+              <User className="size-4 text-muted-foreground" />
+              <span>Pelapor: <strong className="font-semibold text-foreground">{ticket.reporterName}</strong></span>
             </div>
           </div>
         </CardContent>
@@ -105,8 +105,11 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
         {/* Kolom kiri (2/3): detail tiket */}
         <div className="flex flex-col gap-6 lg:col-span-2 min-w-0">
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base font-semibold">Rincian Laporan</CardTitle>
+            <CardHeader className="border-b">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <FileText className="size-4 text-muted-foreground" />
+                Rincian Laporan
+              </CardTitle>
               <CardDescription>Salinan data laporan untuk koordinasi penugasan</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -165,12 +168,12 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
 
           {/* Riwayat penugasan tiket ini */}
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base font-semibold">
-                {/* <History className="size-4 text-muted-foreground" /> */}
+            <CardHeader className="border-b">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <History className="size-4 text-muted-foreground" />
                 Riwayat Penugasan Tiket
               </CardTitle>
-              <CardDescription>Kronologi pergantian handler tiket ini</CardDescription>
+              <CardDescription className="text-xs">Kronologi pergantian handler tiket ini</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="relative space-y-4 pl-6">
@@ -205,12 +208,12 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
         {/* Kolom kanan (1/3): assign handler */}
         <div className="flex flex-col gap-6 min-w-0">
           <Card>
-            <CardHeader>
+            <CardHeader className="border-b">
               <CardTitle className="flex items-center gap-2 text-sm font-semibold">
                 <UserPlus className="size-4 text-primary" />
                 Assign Handler
               </CardTitle>
-              <CardDescription>Tentukan handler penanganan untuk tiket ini</CardDescription>
+              <CardDescription className="text-xs">Tentukan handler penanganan untuk tiket ini</CardDescription>
             </CardHeader>
             <CardContent>
               <FieldGroup>
@@ -244,8 +247,11 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-semibold">Info Pelapor</CardTitle>
+            <CardHeader className="border-b">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <User className="size-4 text-muted-foreground" />
+                Info Pelapor
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2.5 text-xs text-muted-foreground">
               <div className="flex items-center justify-between">

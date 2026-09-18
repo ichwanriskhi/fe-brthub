@@ -48,50 +48,80 @@ export default function ManagerDashboardPage() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="bg-muted/50 px-6 py-3">ID Tiket</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Subjek</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Handler</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Tipe</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Status</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3 text-right">Aksi</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {recentPending.map((ticket) => (
-                <TableRow key={ticket.id}>
-                  <TableCell className="px-6 py-3 font-mono text-xs whitespace-nowrap">{ticket.id}</TableCell>
-                  <TableCell className="px-6 py-3">
-                    <div className="max-w-[240px] space-y-0.5">
-                      <p className="truncate text-sm font-medium">{ticket.subject}</p>
-                      <p className="truncate text-xs text-muted-foreground">{ticket.category}</p>
-                    </div>
-                  </TableCell>
-                  <TableCell className="px-6 py-3 text-sm">{ticket.handlerName ?? '-'}</TableCell>
-                  <TableCell className="px-6 py-3">
+          <div className="md:hidden border-t">
+            {recentPending.map((ticket) => (
+              <div key={ticket.id} className="border-b last:border-0 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <p className="font-mono text-xs text-muted-foreground">{ticket.id}</p>
+                    <p className="text-sm font-semibold line-clamp-2">{ticket.subject}</p>
+                    <p className="text-xs text-muted-foreground truncate">{ticket.category}</p>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
                     <TypeBadge ticketType={ticket.ticketType} />
-                  </TableCell>
-                  <TableCell className="px-6 py-3">
-                    <StatusBadge status={ticket.status} />
-                  </TableCell>
-                  <TableCell className="px-6 py-3 text-right">
-                    <Button variant="ghost" size="sm" asChild>
-                      <Link href={`/manager/antrean/${ticket.id}`}>Review</Link>
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {recentPending.length === 0 && (
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <StatusBadge status={ticket.status} />
+                  <Button variant="outline" size="sm" asChild className="h-7 text-xs">
+                    <Link href={`/manager/antrean/${ticket.id}`}>Review</Link>
+                  </Button>
+                </div>
+              </div>
+            ))}
+            {recentPending.length === 0 && (
+              <div className="p-4 text-center text-xs text-muted-foreground italic">
+                Tidak ada case menunggu penutupan.
+              </div>
+            )}
+          </div>
+
+          <div className="hidden md:block">
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={6} className="h-32 text-center text-xs text-muted-foreground italic">
-                    Tidak ada case menunggu penutupan.
-                  </TableCell>
+                  <TableHead className="bg-muted/50 px-6 py-3">ID Tiket</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Subjek</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Handler</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Tipe</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Status</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3 text-right">Aksi</TableHead>
                 </TableRow>
-              )}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {recentPending.map((ticket) => (
+                  <TableRow key={ticket.id}>
+                    <TableCell className="px-6 py-3 font-mono text-xs whitespace-nowrap">{ticket.id}</TableCell>
+                    <TableCell className="px-6 py-3">
+                      <div className="max-w-[240px] space-y-0.5">
+                        <p className="truncate text-sm font-medium">{ticket.subject}</p>
+                        <p className="truncate text-xs text-muted-foreground">{ticket.category}</p>
+                      </div>
+                    </TableCell>
+                    <TableCell className="px-6 py-3 text-sm">{ticket.handlerName ?? '-'}</TableCell>
+                    <TableCell className="px-6 py-3">
+                      <TypeBadge ticketType={ticket.ticketType} />
+                    </TableCell>
+                    <TableCell className="px-6 py-3">
+                      <StatusBadge status={ticket.status} />
+                    </TableCell>
+                    <TableCell className="px-6 py-3 text-right">
+                      <Button variant="ghost" size="sm" asChild>
+                        <Link href={`/manager/antrean/${ticket.id}`}>Review</Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {recentPending.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="h-32 text-center text-xs text-muted-foreground italic">
+                      Tidak ada case menunggu penutupan.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </div>

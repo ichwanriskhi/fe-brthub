@@ -74,48 +74,74 @@ export default function HandlerDashboardPage() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="bg-muted/50 px-6 py-3">ID Tiket</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Subjek</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Tipe</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Prioritas</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Status</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Aksi</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {urgentQueue.map((ticket) => (
-                <TableRow key={ticket.id}>
-                  <TableCell className="px-6 py-3 font-mono text-xs whitespace-nowrap">{ticket.id}</TableCell>
-                  <TableCell className="px-6 py-3">
-                    <div className="max-w-[240px] space-y-0.5">
-                      <p className="truncate text-sm font-medium">{ticket.subject}</p>
-                      <p className="truncate text-xs text-muted-foreground">SO: {ticket.soNumber ?? '-'}</p>
-                    </div>
-                  </TableCell>
-                  <TableCell className="px-6 py-3">
-                    <TypeBadge ticketType={ticket.ticketType} />
-                  </TableCell>
-                  <TableCell className="px-6 py-3">
+          <div className="md:hidden border-t">
+            {urgentQueue.map((ticket) => (
+              <div key={ticket.id} className="border-b last:border-0 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <p className="font-mono text-xs text-muted-foreground">{ticket.id}</p>
+                    <p className="text-sm font-semibold line-clamp-2">{ticket.subject}</p>
+                    <p className="text-xs text-muted-foreground truncate">SO: {ticket.soNumber ?? '-'}</p>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
                     <PriorityBadge priority={ticket.priority} />
-                  </TableCell>
-                  <TableCell className="px-6 py-3">
-                    <StatusBadge status={ticket.status} />
-                  </TableCell>
-                  <TableCell className="px-6 py-3">
-                    <Button variant="ghost" size="sm" asChild className="gap-1 text-xs">
-                      <Link href={`/handler/ticket/${ticket.id}`}>
-                        Detail
-                        <ArrowUpRight className="size-3.5" />
-                      </Link>
-                    </Button>
-                  </TableCell>
+                    <TypeBadge ticketType={ticket.ticketType} />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <StatusBadge status={ticket.status} />
+                  <Button variant="outline" size="sm" asChild className="h-7 text-xs">
+                    <Link href={`/handler/ticket/${ticket.id}`}>Detail</Link>
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="bg-muted/50 px-6 py-3">ID Tiket</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Subjek</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Tipe</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Prioritas</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Status</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Aksi</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {urgentQueue.map((ticket) => (
+                  <TableRow key={ticket.id}>
+                    <TableCell className="px-6 py-3 font-mono text-xs whitespace-nowrap">{ticket.id}</TableCell>
+                    <TableCell className="px-6 py-3">
+                      <div className="max-w-[240px] space-y-0.5">
+                        <p className="truncate text-sm font-medium">{ticket.subject}</p>
+                        <p className="truncate text-xs text-muted-foreground">SO: {ticket.soNumber ?? '-'}</p>
+                      </div>
+                    </TableCell>
+                    <TableCell className="px-6 py-3">
+                      <TypeBadge ticketType={ticket.ticketType} />
+                    </TableCell>
+                    <TableCell className="px-6 py-3">
+                      <PriorityBadge priority={ticket.priority} />
+                    </TableCell>
+                    <TableCell className="px-6 py-3">
+                      <StatusBadge status={ticket.status} />
+                    </TableCell>
+                    <TableCell className="px-6 py-3">
+                      <Button variant="ghost" size="sm" asChild className="gap-1 text-xs">
+                        <Link href={`/handler/ticket/${ticket.id}`}>
+                          Detail
+                          <ArrowUpRight className="size-3.5" />
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
 

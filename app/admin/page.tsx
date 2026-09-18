@@ -65,43 +65,74 @@ export default function AdminDashboardPage() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="bg-muted/50 px-6 py-3">ID Tiket</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Subjek</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Pelapor</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Tipe</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Prioritas</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {recentTickets.map((ticket) => (
-                <TableRow key={ticket.id}>
-                  <TableCell className="px-6 py-3 font-mono text-xs whitespace-nowrap">{ticket.id}</TableCell>
-                  <TableCell className="px-6 py-3">
+          <div className="md:hidden border-t">
+            {recentTickets.map((ticket) => (
+              <div key={ticket.id} className="border-b last:border-0 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <p className="font-mono text-xs text-muted-foreground">{ticket.id}</p>
                     <Link
                       href={`/admin/monitoring/${ticket.id}`}
-                      className="block max-w-[240px] truncate text-sm font-medium hover:text-primary transition-colors"
+                      className="block text-sm font-semibold hover:text-primary transition-colors line-clamp-2"
                     >
                       {ticket.subject}
                     </Link>
-                  </TableCell>
-                  <TableCell className="px-6 py-3 text-sm">{ticket.reporterName}</TableCell>
-                  <TableCell className="px-6 py-3">
-                    <TypeBadge ticketType={ticket.ticketType} />
-                  </TableCell>
-                  <TableCell className="px-6 py-3">
+                    <p className="text-xs text-muted-foreground truncate">{ticket.reporterName}</p>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
                     <PriorityBadge priority={ticket.priority} />
-                  </TableCell>
-                  <TableCell className="px-6 py-3">
-                    <StatusBadge status={ticket.status} />
-                  </TableCell>
+                    <TypeBadge ticketType={ticket.ticketType} />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <StatusBadge status={ticket.status} />
+                  <Button variant="outline" size="sm" asChild className="h-7 text-xs">
+                    <Link href={`/admin/monitoring/${ticket.id}`}>Lihat</Link>
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="bg-muted/50 px-6 py-3">ID Tiket</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Subjek</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Pelapor</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Tipe</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Prioritas</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3">Status</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {recentTickets.map((ticket) => (
+                  <TableRow key={ticket.id}>
+                    <TableCell className="px-6 py-3 font-mono text-xs whitespace-nowrap">{ticket.id}</TableCell>
+                    <TableCell className="px-6 py-3">
+                      <Link
+                        href={`/admin/monitoring/${ticket.id}`}
+                        className="block max-w-[240px] truncate text-sm font-medium hover:text-primary transition-colors"
+                      >
+                        {ticket.subject}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="px-6 py-3 text-sm">{ticket.reporterName}</TableCell>
+                    <TableCell className="px-6 py-3">
+                      <TypeBadge ticketType={ticket.ticketType} />
+                    </TableCell>
+                    <TableCell className="px-6 py-3">
+                      <PriorityBadge priority={ticket.priority} />
+                    </TableCell>
+                    <TableCell className="px-6 py-3">
+                      <StatusBadge status={ticket.status} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
 

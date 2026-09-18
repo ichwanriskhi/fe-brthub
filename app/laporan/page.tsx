@@ -2,9 +2,10 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { MOCK_TICKETS } from '@/lib/mock/data';
+import { MOCK_TICKETS, MOCK_CHAT } from '@/lib/mock/data';
 import type { TicketStatus } from '@/lib/types/ticket';
 import { StatusBadge } from '@/components/shared/StatusBadge';
+import { TicketChatDrawer } from '@/components/shared/TicketChatDrawer';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,7 +18,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination';
-import { Plus, FileText } from 'lucide-react';
+import { Plus, FileText, MessageSquare } from 'lucide-react';
 import { TableToolbar, type TableFilterValues } from '@/components/shared/TableToolbar';
 import type { DateRange } from 'react-day-picker';
 
@@ -32,11 +33,20 @@ const STATUS_OPTIONS: { value: TicketStatus; label: string }[] = [
 
 const TICKETS_PER_PAGE = 10;
 
+/** Mock unread count — tiket dengan id tertentu punya pesan belum terbaca */
+const MOCK_UNREAD: Record<string, number> = {
+  [MOCK_TICKETS[0]?.id ?? '']: 2,
+  [MOCK_TICKETS[2]?.id ?? '']: 1,
+};
+
 export default function ReportHistoryPage() {
   const [filterValues, setFilterValues] = useState<TableFilterValues>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [currentPage, setCurrentPage] = useState(1);
+
+  // State chat drawer per tiket
+  const [chatTicketId, setChatTicketId] = useState<string | null>(null);
 
   const setFilter = (key: string, value: string | null) => {
     setFilterValues((prev) => ({ ...prev, [key]: value }));
@@ -143,37 +153,55 @@ export default function ReportHistoryPage() {
         <>
           {/* Mobile */}
           <div className="sm:hidden space-y-3">
-            {paginatedTickets.map((ticket) => (
-              <Card key={ticket.id}>
-                <CardContent className="p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1 min-w-0">
-                      <p className="font-mono text-[11px] text-muted-foreground">{ticket.id}</p>
-                      <h3 className="font-semibold text-sm leading-snug line-clamp-2">{ticket.subject}</h3>
+            {paginatedTickets.map((ticket) => {
+              const unread = MOCK_UNREAD[ticket.id] ?? 0;
+              return (
+                <Card key={ticket.id}>
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1 min-w-0">
+                        <p className="font-mono text-[11px] text-muted-foreground">{ticket.id}</p>
+                        <h3 className="font-semibold text-sm leading-snug line-clamp-2">{ticket.subject}</h3>
+                      </div>
+                      <StatusBadge status={ticket.status} />
                     </div>
-                    <StatusBadge status={ticket.status} />
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <Badge variant="secondary" className="text-[11px] font-normal">
-                      {ticket.category}
-                    </Badge>
-                    <span className="text-[11px] text-muted-foreground">SO: {ticket.soNumber ?? '-'}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                    <span>
-                      {new Date(ticket.createdAt).toLocaleDateString('id-ID', {
-                        day: 'numeric',
-                        month: 'short',
-                        year: 'numeric',
-                      })}
-                    </span>
-                    <Button variant="ghost" size="sm" asChild className="h-7 px-2 text-xs text-primary">
-                      <Link href={`/laporan/${ticket.id}`}>Lihat Detail</Link>
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Badge variant="secondary" className="text-[11px] font-normal">
+                        {ticket.category}
+                      </Badge>
+                      <span className="text-[11px] text-muted-foreground">SO: {ticket.soNumber ?? '-'}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                      <span>
+                        {new Date(ticket.createdAt).toLocaleDateString('id-ID', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                        })}
+                      </span>
+                      {/* ── Revisi 7: action row di mobile ── */}
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => setChatTicketId(ticket.id)}
+                          className="relative flex items-center gap-1 rounded-md px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                          aria-label="Buka diskusi tiket"
+                        >
+                          <MessageSquare className="size-4" />
+                          {unread > 0 && (
+                            <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
+                              {unread}
+                            </span>
+                          )}
+                        </button>
+                        <Button size="sm" asChild className="h-7 px-2 text-xs gap-1">
+                          <Link href={`/laporan/${ticket.id}`}>Lihat Detail</Link>
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
 
           {/* Desktop — shadcn Table */}
@@ -190,31 +218,49 @@ export default function ReportHistoryPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginatedTickets.map((ticket) => (
-                  <TableRow key={ticket.id}>
-                    <TableCell className="px-6 py-3 font-mono text-xs text-muted-foreground whitespace-nowrap">{ticket.id}</TableCell>
-                    <TableCell className="px-6 py-3">
-                      <div className="space-y-0.5 max-w-[260px]">
-                        <p className="font-medium text-sm leading-none truncate">{ticket.subject}</p>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {ticket.customerData?.name ?? ticket.reporterName} · SO: {ticket.soNumber ?? '-'}
-                        </p>
-                      </div>
-                    </TableCell>
-                    <TableCell className="px-6 py-3 text-xs text-muted-foreground whitespace-nowrap">{ticket.category}</TableCell>
-                    <TableCell className="px-6 py-3">
-                      <StatusBadge status={ticket.status} />
-                    </TableCell>
-                    <TableCell className="px-6 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                      {new Date(ticket.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
-                    </TableCell>
-                    <TableCell className="px-6 py-3 text-right">
-                      <Button variant="outline" size="sm" asChild className="h-7 text-xs">
-                        <Link href={`/laporan/${ticket.id}`}>Detail</Link>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {paginatedTickets.map((ticket) => {
+                  const unread = MOCK_UNREAD[ticket.id] ?? 0;
+                  return (
+                    <TableRow key={ticket.id}>
+                      <TableCell className="px-6 py-3 font-mono text-xs text-muted-foreground whitespace-nowrap">{ticket.id}</TableCell>
+                      <TableCell className="px-6 py-3">
+                        <div className="space-y-0.5 max-w-[260px]">
+                          <p className="font-medium text-sm leading-none truncate">{ticket.subject}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {ticket.customerData?.name ?? ticket.reporterName} · SO: {ticket.soNumber ?? '-'}
+                          </p>
+                        </div>
+                      </TableCell>
+                      <TableCell className="px-6 py-3 text-xs text-muted-foreground whitespace-nowrap">{ticket.category}</TableCell>
+                      <TableCell className="px-6 py-3">
+                        <StatusBadge status={ticket.status} />
+                      </TableCell>
+                      <TableCell className="px-6 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                        {new Date(ticket.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </TableCell>
+                      {/* ── Revisi 7: kolom Aksi dengan icon chat + tombol Detail ── */}
+                      <TableCell className="px-6 py-3 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => setChatTicketId(ticket.id)}
+                            className="relative flex items-center justify-center rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                            aria-label="Buka diskusi tiket"
+                          >
+                            <MessageSquare className="size-4" />
+                            {unread > 0 && (
+                              <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
+                                {unread}
+                              </span>
+                            )}
+                          </button>
+                          <Button size="sm" asChild className="h-7 text-xs">
+                            <Link href={`/laporan/${ticket.id}`}>Detail</Link>
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </Card>
@@ -235,6 +281,15 @@ export default function ReportHistoryPage() {
             </Pagination>
           )}
         </>
+      )}
+
+      {/* ── Revisi 7: TicketChatDrawer — terbuka saat icon chat diklik ── */}
+      {chatTicketId && (
+        <TicketChatDrawer
+          ticketId={chatTicketId}
+          open={!!chatTicketId}
+          onOpenChange={(open) => { if (!open) setChatTicketId(null); }}
+        />
       )}
     </div>
   );

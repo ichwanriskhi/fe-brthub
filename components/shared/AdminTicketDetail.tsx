@@ -14,12 +14,14 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
   ArrowLeft,
+  ClipboardCheck,
   History,
   User,
   Building,
   FileText,
   MessageSquare,
   Paperclip,
+  Truck,
   UserCheck,
   CircleHelp,
   Search,
@@ -66,7 +68,7 @@ export function AdminTicketDetail({ id, backHref, backLabel }: { id: string; bac
 
       {/* Header Card */}
       <Card>
-        <CardContent className="space-y-3 pt-6">
+        <CardContent className="space-y-4 pt-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 space-y-1">
               <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
@@ -87,21 +89,22 @@ export function AdminTicketDetail({ id, backHref, backLabel }: { id: string; bac
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-x-6 gap-y-2 border-t pt-3 text-xs text-muted-foreground">
+          <div className="flex flex-wrap gap-x-6 gap-y-3 border-t pt-4 text-xs text-muted-foreground">
             <div className="flex items-center gap-1.5">
-              <User className="size-4" />
-              <span>Handler: <strong className="text-foreground">{ticket.handlerName ?? '-'}</strong></span>
+              <User className="size-4 text-muted-foreground" />
+              <span>Handler: <strong className="font-semibold text-foreground">{ticket.handlerName ?? '-'}</strong></span>
             </div>
             <div className="flex items-center gap-1.5">
-              <Building className="size-4" />
-              <span>Unit: <strong className="text-foreground">{ticket.assignedUnit ?? '-'}</strong></span>
+              <Building className="size-4 text-muted-foreground" />
+              <span>Unit: <strong className="font-semibold text-foreground">{ticket.assignedUnit ?? '-'}</strong></span>
             </div>
             <div className="flex items-center gap-1.5">
-              <FileText className="size-4" />
-              <span>Kategori: <strong className="text-foreground">{ticket.category}</strong></span>
+              <FileText className="size-4 text-muted-foreground" />
+              <span>Kategori: <strong className="font-semibold text-foreground">{ticket.category}</strong></span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="text-muted-foreground">SO: <strong className="text-foreground">{ticket.soNumber ?? '-'}</strong></span>
+              <FileText className="size-4 text-muted-foreground" />
+              <span>SO: <strong className="font-semibold text-foreground">{ticket.soNumber ?? '-'}</strong></span>
             </div>
           </div>
         </CardContent>
@@ -113,8 +116,8 @@ export function AdminTicketDetail({ id, backHref, backLabel }: { id: string; bac
           {/* Reporter Identification */}
           <Card>
             <CardHeader className="border-b">
-              <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <UserCheck className="size-4 text-primary" />
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <UserCheck className="size-4 text-muted-foreground" />
                 Informasi Reporter
               </CardTitle>
             </CardHeader>
@@ -187,7 +190,10 @@ export function AdminTicketDetail({ id, backHref, backLabel }: { id: string; bac
           {ticket.claimedItems && ticket.claimedItems.length > 0 && (
             <Card>
               <CardHeader className="border-b">
-                <CardTitle className="text-base font-semibold">Informasi Barang Claim</CardTitle>
+                <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                  <Truck className="size-4 text-muted-foreground" />
+                  Informasi Barang Claim
+                </CardTitle>
               </CardHeader>
               <CardContent className="pt-4">
                 <ClaimItemsTable items={ticket.claimedItems} />
@@ -199,7 +205,7 @@ export function AdminTicketDetail({ id, backHref, backLabel }: { id: string; bac
           {ticket.handlerProgress && ticket.handlerProgress.length > 0 && (
             <Card>
               <CardHeader className="border-b">
-                <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                <CardTitle className="flex items-center gap-2 text-sm font-semibold">
                   <History className="size-4 text-muted-foreground" />
                   Progres Pengerjaan Handler
                 </CardTitle>
@@ -228,7 +234,10 @@ export function AdminTicketDetail({ id, backHref, backLabel }: { id: string; bac
           {ticket.resolutionSummary && (
             <Card>
               <CardHeader className="border-b">
-                <CardTitle className="text-base font-semibold">Resolusi</CardTitle>
+                <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                  <ClipboardCheck className="size-4 text-muted-foreground" />
+                  Resolusi
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4 pt-4">
                 <p className="p-3 rounded-lg bg-muted/40 border text-xs md:text-sm leading-relaxed">
@@ -263,8 +272,8 @@ export function AdminTicketDetail({ id, backHref, backLabel }: { id: string; bac
         <div className="space-y-6 min-w-0">
           <Card>
             <CardHeader className="border-b">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <FileText className="size-4 text-primary" />
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <FileText className="size-4 text-muted-foreground" />
                 Info Tiket
               </CardTitle>
             </CardHeader>
@@ -306,8 +315,8 @@ export function AdminTicketDetail({ id, backHref, backLabel }: { id: string; bac
 
           <Card>
             <CardHeader className="border-b">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <MessageSquare className="size-4 text-primary" />
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <MessageSquare className="size-4 text-muted-foreground" />
                 Diskusi Tiket
               </CardTitle>
             </CardHeader>

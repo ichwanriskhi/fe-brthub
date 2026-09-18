@@ -24,11 +24,13 @@ import { Field, FieldLabel } from '@/components/ui/field';
 import {
   ArrowLeft,
   CheckCircle2,
+  ClipboardCheck,
   RotateCcw,
   FileText,
   History,
   MessageSquare,
   Paperclip,
+  Truck,
   User,
   Building,
 } from 'lucide-react';
@@ -70,7 +72,7 @@ export default function ManagerCaseDetailPage({ params }: { params: Promise<{ id
         <Button variant="ghost" size="sm" asChild className="gap-2 text-muted-foreground hover:text-foreground">
           <Link href="/manager/antrean">
             <ArrowLeft className="size-4" />
-            <span>Kembali ke Antrean</span>
+            <span>Kembali</span>
           </Link>
         </Button>
 
@@ -86,7 +88,7 @@ export default function ManagerCaseDetailPage({ params }: { params: Promise<{ id
 
       {/* Header Card */}
       <Card>
-        <CardContent className="space-y-3 pt-6">
+        <CardContent className="space-y-4 pt-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 space-y-1">
               <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
@@ -103,18 +105,18 @@ export default function ManagerCaseDetailPage({ params }: { params: Promise<{ id
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-x-6 gap-y-2 border-t pt-3 text-xs text-muted-foreground">
+          <div className="flex flex-wrap gap-x-6 gap-y-3 border-t pt-4 text-xs text-muted-foreground">
             <div className="flex items-center gap-1.5">
-              <User className="size-4" />
-              <span>Handler: <strong className="text-foreground">{ticket.handlerName ?? '-'}</strong></span>
+              <User className="size-4 text-muted-foreground" />
+              <span>Handler: <strong className="font-semibold text-foreground">{ticket.handlerName ?? '-'}</strong></span>
             </div>
             <div className="flex items-center gap-1.5">
-              <Building className="size-4" />
-              <span>Unit: <strong className="text-foreground">{ticket.assignedUnit ?? '-'}</strong></span>
+              <Building className="size-4 text-muted-foreground" />
+              <span>Unit: <strong className="font-semibold text-foreground">{ticket.assignedUnit ?? '-'}</strong></span>
             </div>
             <div className="flex items-center gap-1.5">
-              <FileText className="size-4" />
-              <span>Kategori: <strong className="text-foreground">{ticket.category}</strong></span>
+              <FileText className="size-4 text-muted-foreground" />
+              <span>Kategori: <strong className="font-semibold text-foreground">{ticket.category}</strong></span>
             </div>
           </div>
         </CardContent>
@@ -127,7 +129,7 @@ export default function ManagerCaseDetailPage({ params }: { params: Promise<{ id
           {(ticket.handlerProgress && ticket.handlerProgress.length > 0) && (
             <Card>
               <CardHeader className="border-b">
-                <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                <CardTitle className="flex items-center gap-2 text-sm font-semibold">
                   <History className="size-4 text-muted-foreground" />
                   Progres Pengerjaan Handler
                 </CardTitle>
@@ -155,12 +157,13 @@ export default function ManagerCaseDetailPage({ params }: { params: Promise<{ id
           {/* Resolusi Diajukan */}
           <Card>
             <CardHeader className="border-b">
-              <div className="space-y-0.5">
-                <CardTitle className="text-base font-semibold">Resolusi Diajukan Handler</CardTitle>
-                <CardDescription className="text-xs">
-                  Review dan tentukan apakah solusi sudah tepat untuk penutupan case.
-                </CardDescription>
-              </div>
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <ClipboardCheck className="size-4 text-muted-foreground" />
+                Resolusi Diajukan Handler
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Review dan tentukan apakah solusi sudah tepat untuk penutupan case.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 pt-4">
               <div>
@@ -201,7 +204,10 @@ export default function ManagerCaseDetailPage({ params }: { params: Promise<{ id
           {ticket.claimedItems && ticket.claimedItems.length > 0 && (
             <Card>
               <CardHeader className="border-b">
-                <CardTitle className="text-base font-semibold">Informasi Barang Claim</CardTitle>
+                <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                  <Truck className="size-4 text-muted-foreground" />
+                  Informasi Barang Claim
+                </CardTitle>
               </CardHeader>
               <CardContent className="pt-4">
                 <ClaimItemsTable items={ticket.claimedItems} />
@@ -214,9 +220,9 @@ export default function ManagerCaseDetailPage({ params }: { params: Promise<{ id
         <div className="space-y-6 min-w-0">
           <Card>
             <CardHeader className="border-b">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
                 <CheckCircle2 className="size-4 text-primary" />
-                <span>Verifikasi Penutupan</span>
+                Verifikasi Penutupan
               </CardTitle>
               <CardDescription className="text-xs">
                 Apakah solusi handler sudah tepat?

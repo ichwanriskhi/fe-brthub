@@ -136,7 +136,6 @@ export default function AdminTicketActionPage() {
                     <div className="flex items-center justify-between gap-2">
                       <Button
                         size="sm"
-                        variant="outline"
                         className="h-7 gap-1.5 text-xs"
                         onClick={() => setIdentifyTicketId(ticket.id)}
                       >
@@ -192,14 +191,13 @@ export default function AdminTicketActionPage() {
                         <div className="flex items-center justify-end gap-2">
                           <Button
                             size="sm"
-                            variant="outline"
                             className="gap-1.5 text-xs"
                             onClick={() => setIdentifyTicketId(ticket.id)}
                           >
                             <UserSearch className="size-3.5" />
                             Identifikasi
                           </Button>
-                          <Button variant="outline" size="sm" className="gap-1.5 text-xs" asChild>
+                          <Button variant="secondary" size="sm" className="gap-1.5 text-xs" asChild>
                             <Link href={`/admin/ticket/action/${ticket.id}`}>
                               Detail <ArrowUpRight data-icon="inline-end" />
                             </Link>

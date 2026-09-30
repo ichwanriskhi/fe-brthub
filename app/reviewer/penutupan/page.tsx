@@ -24,7 +24,7 @@ import type { DateRange } from 'react-day-picker';
 
 const TICKETS_PER_PAGE = 10;
 
-export default function TinjauanAkhirPage() {
+export default function PenutupanPage() {
   const [search, setSearch] = useState('');
   const [filterValues, setFilterValues] = useState<TableFilterValues>({});
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
@@ -35,8 +35,8 @@ export default function TinjauanAkhirPage() {
     setCurrentPage(1);
   };
 
-  const pendingTickets = MOCK_TICKETS.filter((t) => {
-    const isPending = t.status === 'PENDING_REVIEW';
+  const closedTickets = MOCK_TICKETS.filter((t) => {
+    const isClosed = t.status === 'CLOSED';
     const q = search.toLowerCase().trim();
     const matchesSearch =
       q === '' ||
@@ -53,12 +53,12 @@ export default function TinjauanAkhirPage() {
       !dateRange?.from ||
       (created >= new Date(dateRange.from.toDateString()) &&
         (!dateRange.to || created <= new Date(dateRange.to.toDateString() + ' 23:59')));
-    return isPending && matchesSearch && matchesPriority && matchesType && matchesCategory && matchesDate;
+    return isClosed && matchesSearch && matchesPriority && matchesType && matchesCategory && matchesDate;
   });
 
-  const totalPages = Math.max(1, Math.ceil(pendingTickets.length / TICKETS_PER_PAGE));
+  const totalPages = Math.max(1, Math.ceil(closedTickets.length / TICKETS_PER_PAGE));
   const safePage = Math.min(currentPage, totalPages);
-  const paginatedTickets = pendingTickets.slice((safePage - 1) * TICKETS_PER_PAGE, safePage * TICKETS_PER_PAGE);
+  const paginatedTickets = closedTickets.slice((safePage - 1) * TICKETS_PER_PAGE, safePage * TICKETS_PER_PAGE);
 
   const getPaginationItems = () => {
     const items: (number | 'ellipsis')[] = [];
@@ -110,14 +110,14 @@ export default function TinjauanAkhirPage() {
         {paginatedTickets.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 border-t py-12 text-center">
             <Clock className="size-8 text-muted-foreground/60" />
-            <p className="text-sm font-medium">Tidak ada tiket dalam antrean tinjauan akhir</p>
-            <p className="text-xs text-muted-foreground">Semua pekerjaan telah ditinjau.</p>
+            <p className="text-sm font-medium">Tidak ada tiket dalam arsip penutupan</p>
+            <p className="text-xs text-muted-foreground">Tiket yang ditutup akan muncul di sini.</p>
           </div>
         ) : (
           <div className="md:hidden px-4 pb-4 -mt-2">
             <TicketCardList
               tickets={paginatedTickets}
-              actionLabel="Konfirmasi"
+              actionLabel="Lihat"
               hrefBase="/reviewer/tiket"
               meta={(t) => ({ label: 'Unit', value: t.assignedUnit ?? 'Teknis BRT' })}
             />
@@ -162,8 +162,8 @@ export default function TinjauanAkhirPage() {
                   </TableCell>
                   <TableCell className="px-6 py-3">
                     <Button variant="outline" size="sm" asChild>
-                      <Link href={`/reviewer/tiket/${ticket.id}/tinjauan-akhir`}>
-                        Konfirmasi
+                      <Link href={`/reviewer/tiket/${ticket.id}/penutupan`}>
+                        Lihat Detail
                         <ChevronRight data-icon="inline-end" />
                       </Link>
                     </Button>

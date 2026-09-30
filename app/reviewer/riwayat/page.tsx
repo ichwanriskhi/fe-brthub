@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { MOCK_TICKETS } from '@/lib/mock/data';
-import type { TicketStatus, TicketPriority, TicketType } from '@/lib/types/ticket';
+import { getMyReviewedTickets, toTicket } from '@/lib/api/tickets';
+import type { Ticket, TicketStatus, TicketPriority, TicketType } from '@/lib/types/ticket';
 import { StatusBadge, TypeBadge, PriorityBadge } from '@/components/shared/StatusBadge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -30,12 +30,13 @@ const STATUS_OPTIONS: { value: TicketStatus; label: string }[] = [
   { value: 'REWORK_REQUIRED', label: 'Perlu Revisi' },
   { value: 'REJECTED', label: 'Ditolak' },
   { value: 'CLOSED', label: 'Selesai' },
+  { value: 'PENDING_APPROVAL', label: 'Menunggu Approval' },
 ];
 
 const PRIORITY_OPTIONS: { value: string; label: string }[] = [
-  { value: 'A', label: 'Prioritas A (Critical)' },
-  { value: 'B', label: 'Prioritas B (High)' },
-  { value: 'C', label: 'Prioritas C (Normal)' },
+  { value: 'A', label: 'Prioritas A (Tinggi)' },
+  { value: 'B', label: 'Prioritas B (Normal)' },
+  { value: 'C', label: 'Prioritas C (Rendah)' },
 ];
 
 const TYPE_OPTIONS: { value: TicketType; label: string }[] = [
@@ -45,22 +46,58 @@ const TYPE_OPTIONS: { value: TicketType; label: string }[] = [
   { value: 'INQUIRY', label: 'Inquiry' },
 ];
 
-const CATEGORY_OPTIONS = [...new Set(MOCK_TICKETS.map((t) => t.category))].map((c) => ({ value: c, label: c }));
-
 const TICKETS_PER_PAGE = 10;
 
 export default function ReviewerRiwayatPage() {
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterValues, setFilterValues] = useState<TableFilterValues>({});
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [currentPage, setCurrentPage] = useState(1);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+
+    getMyReviewedTickets(currentPage)
+      .then((payload: unknown) => {
+        if (cancelled) return;
+        // Backend returns paginated Laravel response: { data: [...], last_page, ... }
+        const body = payload as { data?: unknown[]; last_page?: number };
+        const items = Array.isArray(body.data) ? body.data : [];
+        // Normalisasi lewat toTicket supaya priority/status/category dll.
+        // punya shape yang sama dengan halaman lain (PriorityBadge butuh 'A'/'B'/'C').
+        const mapped = items.map((raw) => toTicket(raw));
+        setTickets(mapped);
+        setServerLastPage(Number(body.last_page) || 1);
+      })
+      .catch((error) => {
+        console.error('Error fetching reviewed tickets:', error);
+        if (cancelled) {
+          setTickets([]);
+          setServerLastPage(1);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentPage]);
+
+  const [serverLastPage, setServerLastPage] = useState(1);
 
   const setFilter = (key: string, value: string | null) => {
     setFilterValues((prev) => ({ ...prev, [key]: value }));
     setCurrentPage(1);
   };
 
-  const filteredTickets = MOCK_TICKETS.filter((t) => {
+  const categoryOptions = [...new Set(tickets.map((t) => t.category))].map((c) => ({ value: c, label: c }));
+
+  const filteredTickets = tickets.filter((t) => {
     const q = search.toLowerCase().trim();
     const matchesSearch =
       q === '' ||
@@ -103,13 +140,13 @@ export default function ReviewerRiwayatPage() {
 
   const goToPage = (p: number) => setCurrentPage(Math.min(Math.max(1, p), totalPages));
 
-  const countByStatus = (status: TicketStatus) => MOCK_TICKETS.filter((t) => t.status === status).length;
+  const countByStatus = (status: TicketStatus) => tickets.filter((t) => t.status === status).length;
 
   const metrics = [
-    { label: 'Total Tiket', value: String(MOCK_TICKETS.length), subtitle: 'Semua tiket tercatat', icon: Archive },
+    { label: 'Total Review', value: String(tickets.length), subtitle: 'Tiket yang pernah Anda review', icon: Archive },
     { label: 'Selesai', value: String(countByStatus('CLOSED')), subtitle: 'Tiket ditutup', icon: CheckCircle2, showTrend: true },
     { label: 'Ditolak', value: String(countByStatus('REJECTED')), subtitle: 'Laporan tidak lolos', icon: XCircle },
-    { label: 'Diproses', value: String(countByStatus('IN_PROGRESS') + countByStatus('PENDING_REVIEW')), subtitle: 'Di unit teknis & review', icon: Loader2 },
+    { label: 'Diproses', value: String(countByStatus('IN_PROGRESS') + countByStatus('PENDING_REVIEW') + countByStatus('PENDING_APPROVAL')), subtitle: 'Di unit teknis & menunggu', icon: Loader2 },
   ]
 
   return (
@@ -129,7 +166,7 @@ export default function ReviewerRiwayatPage() {
               { key: 'status', label: 'Status', options: STATUS_OPTIONS },
               { key: 'type', label: 'Tipe Tiket', options: TYPE_OPTIONS },
               { key: 'priority', label: 'Prioritas', options: PRIORITY_OPTIONS },
-              { key: 'category', label: 'Kategori', options: CATEGORY_OPTIONS },
+              { key: 'category', label: 'Kategori', options: categoryOptions },
             ]}
             filterValues={filterValues}
             onFilterChange={setFilter}
@@ -138,7 +175,12 @@ export default function ReviewerRiwayatPage() {
           />
         </CardContent>
 
-        {paginatedTickets.length === 0 ? (
+        {loading ? (
+          <div className="flex flex-col items-center justify-center gap-2 border-t py-12 text-center">
+            <Loader2 className="size-8 animate-spin text-muted-foreground/60" />
+            <p className="text-sm font-medium">Memuat tiket...</p>
+          </div>
+        ) : paginatedTickets.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 border-t py-12 text-center">
             <Inbox className="size-8 text-muted-foreground/60" />
             <p className="text-sm font-medium">Tidak ada tiket ditemukan</p>
@@ -158,7 +200,7 @@ export default function ReviewerRiwayatPage() {
           </div>
         )}
 
-        {paginatedTickets.length > 0 && (
+        {!loading && paginatedTickets.length > 0 && (
           <div className="hidden md:block">
           <Table>
             <TableHeader>
@@ -215,33 +257,33 @@ export default function ReviewerRiwayatPage() {
           </div>
         )}
 
-        {totalPages > 1 && (
-          <div className="border-t px-6 py-4">
-            <Pagination className="mx-0 w-auto justify-end">
-              <PaginationContent>
-                <PaginationItem>
-                  <PaginationPrevious href="#" onClick={(e) => { e.preventDefault(); goToPage(safePage - 1); }} aria-disabled={safePage === 1} className={safePage === 1 ? 'pointer-events-none opacity-50' : undefined} />
-                </PaginationItem>
-                {getPaginationItems().map((item, i) =>
-                  item === 'ellipsis' ? (
-                    <PaginationItem key={`e-${i}`}>
-                      <PaginationEllipsis />
-                    </PaginationItem>
-                  ) : (
-                    <PaginationItem key={item}>
-                      <PaginationLink href="#" isActive={item === safePage} onClick={(e) => { e.preventDefault(); goToPage(item); }}>
-                        {item}
-                      </PaginationLink>
-                    </PaginationItem>
-                  )
+        {!loading && serverLastPage > 1 && (
+                  <div className="border-t px-6 py-4">
+                    <Pagination className="mx-0 w-auto justify-end">
+                      <PaginationContent>
+                        <PaginationItem>
+                          <PaginationPrevious href="#" onClick={(e) => { e.preventDefault(); goToPage(currentPage - 1); }} aria-disabled={currentPage === 1} className={currentPage === 1 ? 'pointer-events-none opacity-50' : undefined} />
+                        </PaginationItem>
+                        {getPaginationItems().map((item, i) =>
+                          item === 'ellipsis' ? (
+                            <PaginationItem key={`e-${i}`}>
+                              <PaginationEllipsis />
+                            </PaginationItem>
+                          ) : (
+                            <PaginationItem key={item}>
+                              <PaginationLink href="#" isActive={item === currentPage} onClick={(e) => { e.preventDefault(); goToPage(item); }}>
+                                {item}
+                              </PaginationLink>
+                            </PaginationItem>
+                          )
+                        )}
+                        <PaginationItem>
+                          <PaginationNext href="#" onClick={(e) => { e.preventDefault(); goToPage(currentPage + 1); }} aria-disabled={currentPage === serverLastPage} className={currentPage === serverLastPage ? 'pointer-events-none opacity-50' : undefined} />
+                        </PaginationItem>
+                      </PaginationContent>
+                    </Pagination>
+                  </div>
                 )}
-                <PaginationItem>
-                  <PaginationNext href="#" onClick={(e) => { e.preventDefault(); goToPage(safePage + 1); }} aria-disabled={safePage === totalPages} className={safePage === totalPages ? 'pointer-events-none opacity-50' : undefined} />
-                </PaginationItem>
-              </PaginationContent>
-            </Pagination>
-          </div>
-        )}
       </Card>
     </div>
   );

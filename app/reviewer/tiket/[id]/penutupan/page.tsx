@@ -39,18 +39,17 @@ import {
   History,
   ShieldCheck,
   ClipboardCheck,
+  Gavel,
 } from 'lucide-react';
 
-export default function ResolutionReviewPage({ params }: { params: Promise<{ id: string }> }) {
+export default function FinalClosurePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
   const ticket = MOCK_TICKETS.find((t) => t.id === id) || MOCK_TICKETS[0];
 
   const [chatOpen, setChatOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
-  const [reworkOpen, setReworkOpen] = useState(false);
   const [closureOpen, setClosureOpen] = useState(false);
-  const [reworkReason, setReworkReason] = useState('');
   const [actionDone, setActionDone] = useState<string | null>(null);
 
   const cycles = ticket.resolutionCycles ?? [];
@@ -63,17 +62,17 @@ export default function ResolutionReviewPage({ params }: { params: Promise<{ id:
   const previousCycles = cycles.filter((c) => c.id !== currentCycle?.id);
   const resolutionAttachments = ticket.resolutionAttachments ?? [];
 
-  const handleRework = () => {
-    if (!reworkReason.trim()) return;
-    setReworkOpen(false);
-    setActionDone('Permintaan revisi dikirim ke handler. Tiket kembali dikerjakan.');
-    setTimeout(() => router.push('/reviewer/tinjauan-akhir'), 1500);
-  };
+  // Determine closure authority based on approval_target
+  const approvalTarget = ticket.approvalTarget ?? 'Direksi';
+  const closureAuthority = approvalTarget === 'Direksi' ? 'Direktur' :
+                          approvalTarget === 'General Manager' ? 'General Manager' :
+                          approvalTarget === 'Operational Manager' ? 'Operational Manager' :
+                          'Division Head';
 
   const handleClosure = () => {
     setClosureOpen(false);
-    setActionDone('Tiket disetujui & diteruskan ke Direktur untuk penutupan final.');
-    setTimeout(() => router.push('/reviewer/tinjauan-akhir'), 1500);
+    setActionDone(`Tiket ditutup final oleh ${closureAuthority}.`);
+    setTimeout(() => router.push('/reviewer/penutupan'), 1500);
   };
 
   return (
@@ -81,7 +80,7 @@ export default function ResolutionReviewPage({ params }: { params: Promise<{ id:
       {/* Top Bar */}
       <div className="flex items-center justify-between gap-4">
         <Button variant="ghost" size="sm" asChild className="gap-2 text-muted-foreground hover:text-foreground">
-          <Link href="/reviewer/tinjauan-akhir">
+          <Link href="/reviewer/penutupan">
             <ArrowLeft className="size-4" />
             <span>Kembali</span>
           </Link>
@@ -119,6 +118,10 @@ export default function ResolutionReviewPage({ params }: { params: Promise<{ id:
                   {handlerActionLabel}
                 </Badge>
               )}
+              <Badge variant="secondary" className="gap-1">
+                <Gavel className="size-3" />
+                Penutupan Final
+              </Badge>
               <Button variant="outline" size="sm" onClick={() => setReportOpen(true)} className="gap-1.5">
                 <FileText className="size-3.5" />
                 <span>Detail Laporan</span>
@@ -159,7 +162,7 @@ export default function ResolutionReviewPage({ params }: { params: Promise<{ id:
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 min-w-0">
-        {/* Kolom kiri: evaluasi solusi handler */}
+        {/* Kolom kiri: evaluasi solusi handler & riwayat verifikasi */}
         <div className="lg:col-span-2 space-y-6">
           {/* Progres Pengerjaan Handler */}
           {(ticket.handlerProgress && ticket.handlerProgress.length > 0) && (
@@ -292,124 +295,114 @@ export default function ResolutionReviewPage({ params }: { params: Promise<{ id:
             </Card>
           )}
 
+          {/* Verifikasi Tinjauan Akhir (untuk referensi) */}
+          <Card>
+            <CardHeader className="border-b">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <ShieldCheck className="size-4 text-primary" />
+                Hasil Tinjauan Akhir (Reviewer)
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Referensi keputusan verifikasi resolusi sebelumnya.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-xs">
+              <div className="flex items-start gap-2">
+                <CheckCircle2 className="size-3.5 mt-0.5 shrink-0 text-emerald-600" />
+                <span>Resolusi disetujui oleh Reviewer pada siklus <strong className="text-foreground">#{currentCycle?.cycleNumber ?? 1}</strong>.</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <Gavel className="size-3.5 mt-0.5 shrink-0 text-primary" />
+                <span>Tiket diteruskan ke <strong className="text-foreground">{closureAuthority}</strong> untuk penutupan final.</span>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
-        {/* Kolom kanan: keputusan verifikasi final */}
+        {/* Kolom kanan: keputusan penutupan final */}
         <div className="space-y-6 min-w-0">
           <Card>
             <CardHeader className="border-b">
               <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                <FileCheck className="size-4 text-muted-foreground" />
-                Verifikasi Solusi
+                <Gavel className="size-4 text-primary" />
+                Penutupan Final
               </CardTitle>
               <CardDescription className="text-xs">
-                Apakah solusi handler sudah tepat & sesuai laporan?
+                Otoritas akhir untuk menutup tiket berdasarkan Approval Target.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="rounded-lg border bg-muted/40 p-3 space-y-2 text-xs">
+                <div className="text-[10px] font-semibold uppercase text-muted-foreground tracking-wider">
+                  Otoritas Penutupan
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <span className="block text-muted-foreground">Approval Target</span>
+                    <span className="font-semibold">{approvalTarget}</span>
+                  </div>
+                  <div>
+                    <span className="block text-muted-foreground">Otoritas Final</span>
+                    <span className="font-semibold text-primary">{closureAuthority}</span>
+                  </div>
+                  <div>
+                    <span className="block text-muted-foreground">Prioritas</span>
+                    <PriorityBadge priority={ticket.priority} />
+                  </div>
+                  <div>
+                    <span className="block text-muted-foreground">Status Verifikasi</span>
+                    <span className="font-semibold text-emerald-600">Disetujui Reviewer</span>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex items-center gap-2">
                 <Button
                   onClick={() => setClosureOpen(true)}
-                  className="flex-1 text-xs font-semibold gap-2"
+                  className="flex-1 text-xs font-semibold gap-2 bg-primary hover:bg-primary/90"
                 >
                   <CheckCircle2 className="size-4" />
-                  <span>Setujui & Tutup Tiket</span>
+                  <span>Tutup Tiket Final</span>
                 </Button>
               </div>
-              <Button
-                onClick={() => setReworkOpen(true)}
-                variant="outline"
-                className="w-full text-xs font-semibold gap-2"
-              >
-                <RotateCcw className="size-4" />
-                <span>Minta Rework</span>
-              </Button>
-
-              {/* <Separator />
-
-              <Button
-                onClick={() => setChatOpen(true)}
-                variant="ghost"
-                className="w-full text-xs text-muted-foreground hover:text-foreground justify-center gap-2"
-              >
-                <MessageSquare className="size-4 text-primary" />
-                <span>Diskusi dengan Handler/Reporter</span>
-              </Button> */}
             </CardContent>
           </Card>
 
-          {/* Info routing penutupan */}
-          {/* <Card>
+          {/* Info otoritas */}
+          <Card>
             <CardHeader className="border-b">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
                 <ShieldCheck className="size-4 text-primary" />
-                <span>Alur Setelah Persetujuan</span>
+                <span>Basis Otoritas</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-xs text-muted-foreground">
               <div className="flex items-start gap-2">
+                <ShieldCheck className="size-3.5 mt-0.5 shrink-0" />
+                <span>Penutupan final ditentukan oleh <strong className="text-foreground">{closureAuthority}</strong> sesuai <strong className="text-foreground">Approval Target</strong> yang ditetapkan saat Tinjauan Awal.</span>
+              </div>
+              <div className="flex items-start gap-2">
                 <History className="size-3.5 mt-0.5 shrink-0" />
-                <span>Tiket yang disetujui akan diteruskan ke <strong className="text-foreground">Direktur</strong> untuk penutupan final.</span>
-              </div>
-              <div className="flex items-start gap-2">
-                <RotateCcw className="size-3.5 mt-0.5 shrink-0" />
-                <span>Rework mengembalikan tiket ke handler dengan catatan revisi.</span>
-              </div>
-              <div className="flex items-start gap-2">
-                <MessageSquare className="size-3.5 mt-0.5 shrink-0" />
-                <span>Diskusi tersedia untuk klarifikasi tanpa mengubah status.</span>
+                <span>Prioritas (A/B/C) hanya menandai urgensi, <strong className="text-foreground">tidak menentukan</strong> alur approval maupun otoritas penutupan.</span>
               </div>
             </CardContent>
-          </Card> */}
+          </Card>
         </div>
       </div>
 
       {/* Modal Detail Laporan */}
       <ReportDetailModal ticket={ticket} open={reportOpen} onOpenChange={setReportOpen} />
 
-      {/* Modal Rework */}
-      <Dialog open={reworkOpen} onOpenChange={setReworkOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <RotateCcw className="size-4 text-primary" />
-              Minta Rework
-            </DialogTitle>
-            <DialogDescription>
-              Tiket akan dikembalikan ke {ticket.handlerName ?? 'handler'} untuk dikerjakan ulang.
-            </DialogDescription>
-          </DialogHeader>
-          <div>
-            <label className="text-xs font-semibold text-foreground block mb-1">
-              Alasan Rework <span className="text-destructive">*</span>
-            </label>
-            <Textarea
-              placeholder="Jelaskan bagian solusi yang belum tepat atau bukti yang kurang..."
-              value={reworkReason}
-              onChange={(e) => setReworkReason(e.target.value)}
-              className="min-h-24"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setReworkOpen(false)}>Batal</Button>
-            <Button onClick={handleRework} disabled={!reworkReason.trim()} className="gap-1.5">
-              Kirim ke Handler
-              <ArrowRight data-icon="inline-end" />
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Modal Closure */}
       <Dialog open={closureOpen} onOpenChange={setClosureOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <CheckCircle2 className="size-4 text-primary" />
-              Setujui & Tutup Tiket
+              <Gavel className="size-4 text-primary" />
+              Tutup Tiket Final
             </DialogTitle>
             <DialogDescription>
-              Konfirmasi persetujuan resolusi dan penerusan ke Direktur.
+              Konfirmasi penutupan final tiket oleh {closureAuthority}.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 rounded-lg border bg-muted/40 p-3 text-xs">
@@ -427,14 +420,18 @@ export default function ResolutionReviewPage({ params }: { params: Promise<{ id:
             </div>
             <Separator />
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Otoritas Final</span>
-              <span className="font-semibold text-primary">Direktur</span>
+              <span className="text-muted-foreground">Approval Target</span>
+              <span className="font-semibold">{approvalTarget}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Otoritas Penutupan</span>
+              <span className="font-semibold text-primary">{closureAuthority}</span>
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setClosureOpen(false)}>Batal</Button>
-            <Button onClick={handleClosure} className="gap-1.5">
-              Setujui & Teruskan
+            <Button onClick={handleClosure} className="gap-1.5 bg-primary hover:bg-primary/90">
+              Tutup Tiket
               <ArrowRight data-icon="inline-end" />
             </Button>
           </DialogFooter>

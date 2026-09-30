@@ -15,6 +15,7 @@ export interface MasterDataEntry {
 
 export interface CategoryEntry extends MasterDataEntry {
   parentId?: string;
+  code: string;
 }
 
 export interface DepartmentEntry extends MasterDataEntry {
@@ -25,6 +26,8 @@ export interface DepartmentEntry extends MasterDataEntry {
 export interface PositionEntry extends MasterDataEntry {
   /** Hormone hierarchical level — tinggi = lebih senior (Director > Manager) */
   hierarchyLevel: number;
+  departmentId?: string;
+  code: string;
 }
 
 export interface ProductLineEntry extends MasterDataEntry {
@@ -48,8 +51,17 @@ export const APP_ROLES: { value: AppRole; label: string }[] = [
   { value: 'STAFF', label: 'Staff (Reporter Saja)' },
 ];
 
+/** Role yang bisa di-assign ke user di tabel `roles` (bukan Manager/Staff turunan). */
+export const ASSIGNABLE_APP_ROLES: { value: Exclude<AppRole, 'MANAGER' | 'STAFF'>; label: string; dbName: string }[] = [
+  { value: 'ADMIN', label: 'Admin', dbName: 'admin' },
+  { value: 'REVIEWER', label: 'Reviewer', dbName: 'reviewer' },
+  { value: 'HANDLER', label: 'Handler', dbName: 'handler' },
+  { value: 'UNIT', label: 'Unit', dbName: 'unit' },
+];
+
 export interface EmployeeEntry {
   id: string;
+  userId: string;
   employeeNumber: string;
   name: string;
   phone: string;
@@ -60,8 +72,10 @@ export interface EmployeeEntry {
   positionName: string;
   /** 0 = hierarchy level posisi */
   hierarchyLevel: number;
-  /** Role aplikasi (akses setelah login) */
+  /** Role utama (kompatibilitas tampilan lama). */
   role: AppRole;
+  /** Semua role aplikasi yang dimiliki user. */
+  roles: AppRole[];
   accountStatus: AccountStatus;
   /** True bila admin sudah kirim link setup/reset password */
   activationLinkSent: boolean;

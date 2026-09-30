@@ -45,7 +45,8 @@ export const MOCK_TICKETS: Ticket[] = [
       { id: 'att-2', name: 'barang-salah.mp4', size: '8.6 MB', type: 'video/mp4', url: '#' }
     ],
     createdAt: '2026-08-22T18:44:47Z',
-    updatedAt: '2026-08-22T18:44:47Z'
+    updatedAt: '2026-08-22T18:44:47Z',
+    approvalTarget: 'Division'
   },
   {
     id: 'BRT-2026-0909-002',
@@ -132,7 +133,8 @@ export const MOCK_TICKETS: Ticket[] = [
         detail: 'Barang yang tidak sesuai ditindaklanjuti untuk dikembalikan dan dilakukan pengiriman barang pengganti sesuai pesanan customer.',
         isCurrent: true,
       },
-    ]
+    ],
+    approvalTarget: 'Division'
   },
   {
     id: 'BRT-2026-0913-003',
@@ -155,6 +157,7 @@ export const MOCK_TICKETS: Ticket[] = [
     createdAt: '2026-09-13T08:15:00Z',
     updatedAt: '2026-09-13T10:00:00Z',
     handlerName: 'Rian IT Support',
+    approvalTarget: 'Operational Manager'
   },
   {
     id: 'BRT-2026-0912-005',
@@ -195,7 +198,8 @@ export const MOCK_TICKETS: Ticket[] = [
         detail: 'Barang telah dipesan ke vendor PT Indo Mebel, PO #GA-9912. Estimasi tiba tanggal 15 Sept.',
         isCurrent: true,
       },
-    ]
+    ],
+    approvalTarget: 'General Manager'
   },
   {
     id: 'BRT-2026-0911-008',
@@ -229,7 +233,8 @@ export const MOCK_TICKETS: Ticket[] = [
     createdAt: '2026-09-11T10:00:00Z',
     updatedAt: '2026-09-12T16:00:00Z',
     assignedUnit: 'Divisi Teknik & Tuning',
-    handlerName: 'Eko Master Tuner'
+    handlerName: 'Eko Master Tuner',
+    approvalTarget: 'Direksi'
   },
   {
     id: 'BRT-2026-0914-010',
@@ -281,6 +286,7 @@ export const MOCK_TICKETS: Ticket[] = [
         note: 'Cek stok CAM M03#02 di gudang — tersedia 2 unit. Koordinasi ekspedisi untuk pengambilan barang salah.',
       },
     ],
+    approvalTarget: 'Division'
   },
   {
     id: 'BRT-2026-0914-011',
@@ -304,7 +310,8 @@ export const MOCK_TICKETS: Ticket[] = [
     attachments: [],
     createdAt: '2026-09-14T07:15:00Z',
     updatedAt: '2026-09-14T07:15:00Z',
-    assignedUnit: 'IT Service'
+    assignedUnit: 'IT Service',
+    approvalTarget: 'Operational Manager'
   }
 ];
 
@@ -351,11 +358,11 @@ export const MOCK_ACTIVITIES: Record<string, TicketActivity[]> = {
 };
 
 export const MOCK_HANDLERS = [
-  { id: 'dimas', name: 'Dimas P.', unit: 'Distribution & Logistics', activeCases: 5 },
-  { id: 'budi', name: 'Budi S.', unit: 'Distribution & Logistics', activeCases: 3 },
-  { id: 'rian', name: 'Rian IT Support', unit: 'IT Service', activeCases: 2 },
-  { id: 'bambang', name: 'Bambang GA', unit: 'General Affair', activeCases: 1 },
-  { id: 'eko', name: 'Eko Master Tuner', unit: 'Divisi Teknik & Tuning', activeCases: 4 },
+  { id: 'dimas', fileName: 'Dimas P.', unit: 'Distribution & Logistics', activeCases: 5 },
+  { id: 'budi', fileName: 'Budi S.', unit: 'Distribution & Logistics', activeCases: 3 },
+  { id: 'rian', fileName: 'Rian IT Support', unit: 'IT Service', activeCases: 2 },
+  { id: 'bambang', fileName: 'Bambang GA', unit: 'General Affair', activeCases: 1 },
+  { id: 'eko', fileName: 'Eko Master Tuner', unit: 'Divisi Teknik & Tuning', activeCases: 4 },
 ];
 
 export const MOCK_CHAT: Record<string, TicketChatMessage[]> = {
@@ -363,6 +370,7 @@ export const MOCK_CHAT: Record<string, TicketChatMessage[]> = {
     {
       id: 'chat-1',
       ticketId: 'BRT-2026-0913-001',
+      senderUserId: 'user-1',
       senderName: 'Dimas Marketing',
       senderRole: 'Pelapor',
       message: 'Halo Pak, mohon dibantu follow up untuk SO 973603 ya, customer Juliani 78 menanyakan barangnya.',
@@ -371,6 +379,7 @@ export const MOCK_CHAT: Record<string, TicketChatMessage[]> = {
     {
       id: 'chat-2',
       ticketId: 'BRT-2026-0913-001',
+      senderUserId: 'user-2',
       senderName: 'Hendra Reviewer',
       senderRole: 'Reviewer',
       message: 'Siap Pak, sedang kami tinjau di bagian logistik.',

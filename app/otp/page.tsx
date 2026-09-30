@@ -6,19 +6,45 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { RefreshCwIcon, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldLabel, FieldGroup, FieldDescription } from '@/components/ui/field';
 import { InputOTP, InputOTPGroup, InputOTPSeparator, InputOTPSlot } from '@/components/ui/input-otp';
 import { ModeToggle } from '@/components/shared/ModeToggle';
 import { toast } from 'sonner';
+import { authServiceClient } from '@/lib/api/auth-service';
+import { brthubApi, deriveRoles, resolveRoleRedirect } from '@/lib/api/brthub-api';
+import { useAuth, type AuthUser } from '@/lib/auth/auth-context';
 
 function OtpForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const phoneParam = searchParams.get('phone') || '081234567890';
+  const { login } = useAuth();
+
+  const identifierParam = searchParams.get('identifier') || '';
+  const typeParam = searchParams.get('type') as 'email' | 'phone' | null;
+  const modeParam = searchParams.get('mode') ?? 'reporter';
+  const isStaffMode = modeParam === 'staff';
+
+  const identifier = decodeURIComponent(identifierParam);
+  const isEmail = typeParam === 'email';
+
+  // Default next path: staff → login (will be overridden by role redirect),
+  // reporter → /report/new
+  const nextParamRaw = searchParams.get('next');
+  const reporterNextPath =
+    nextParamRaw && nextParamRaw.startsWith('/') && !nextParamRaw.startsWith('//')
+      ? nextParamRaw
+      : '/report/new';
 
   const [code, setCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [resendCountdown, setResendCountdown] = useState(30);
+
+  useEffect(() => {
+    if (!identifier) {
+      toast.error('Identifier tidak ditemukan. Silakan login ulang.');
+      router.push('/verifikasi');
+    }
+  }, [identifier, router]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -27,34 +53,154 @@ function OtpForm() {
     return () => clearInterval(timer);
   }, []);
 
-  const handleVerify = (e: React.FormEvent) => {
+  // ─── Staff login: verify OTP → fetch me from be-brthub → set AuthContext → redirect by role
+  const handleStaffLogin = async (accessToken: string) => {
+    let meData;
+    try {
+      meData = await brthubApi.getMe(accessToken);
+    } catch {
+      throw new Error('Gagal mengambil profil pengguna. Pastikan Anda memiliki akun karyawan BRTHub.');
+    }
+
+    if (!meData.success) {
+      throw new Error('Akun tidak ditemukan di BRTHub. Hubungi admin untuk pendaftaran akun karyawan.');
+    }
+
+    const roles = deriveRoles(
+      meData.brthub?.roles ?? [],
+      meData.brthub?.employee_profile ?? null,
+    );
+    if (roles.length === 0) {
+      throw new Error('Akun Anda belum memiliki peran di BRTHub. Hubungi admin.');
+    }
+
+    const authUser: AuthUser = {
+      uuid: meData.user.uuid,
+      full_name: meData.user.full_name,
+      email: meData.user.email,
+      phone_number: meData.user.phone_number,
+      roles,
+      employee_profile: meData.brthub?.employee_profile ?? null,
+    };
+
+    // Simpan ke AuthContext + localStorage
+    login(accessToken, '', authUser);
+
+    // Role aktif = role yang terakhir dipakai user (bila masih dimiliki),
+    // supaya user multi-role tidak selalu dipaksa ke role tertentu.
+    let preferredRole: string | null = null;
+    try {
+      preferredRole = localStorage.getItem('brthub_active_role');
+    } catch {
+      preferredRole = null;
+    }
+
+    const destination = resolveRoleRedirect(roles, preferredRole);
+    toast.success(`Login berhasil! Selamat datang, ${meData.user.full_name}.`);
+    router.push(destination);
+  };
+
+  // ─── Reporter login: existing flow (save raw token, redirect to report page)
+  const handleReporterLogin = async (accessToken: string, expiresIn?: number) => {
+    localStorage.setItem('auth_token', accessToken);
+
+    try {
+      const userResult = await authServiceClient.getUser(accessToken);
+      if (userResult.success && userResult.data) {
+        localStorage.setItem('user_profile', JSON.stringify(userResult.data));
+      }
+    } catch {
+      // Non-critical — continue even if profile fetch fails
+    }
+
+    // Persist session cookie via API route so proxy.ts lets reporter pages through
+    await fetch('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ access_token: accessToken, expires_in: expiresIn }),
+    });
+
+    toast.success('Login berhasil!');
+    router.push(reporterNextPath);
+  };
+
+  const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (code.length < 6) {
       toast.error('Masukkan 6 digit kode OTP dengan lengkap');
       return;
     }
 
     setIsLoading(true);
-    setTimeout(() => {
+
+    try {
+      // Staff: *_login — reporter: *_otp
+      const action = isStaffMode
+        ? isEmail ? 'email_login' : 'phone_login'
+        : isEmail ? 'email_otp' : 'phone_otp';
+
+      const result = await authServiceClient.verifyOtp(identifier, code, action);
+
+      if (!result.success) {
+        throw new Error(result.error || result.message || 'Verifikasi gagal');
+      }
+
+      const accessToken = result.data?.access_token;
+      if (!accessToken) {
+        throw new Error('Token tidak ditemukan pada respons verifikasi');
+      }
+
+      if (isStaffMode) {
+        await handleStaffLogin(accessToken);
+      } else {
+        await handleReporterLogin(accessToken, result.data?.expires_in);
+      }
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Kode OTP salah atau habis berlaku';
+      toast.error(msg);
+      setCode('');
+    } finally {
       setIsLoading(false);
-      toast.success('Verifikasi OTP berhasil');
-      router.push('/report/new');
-    }, 800);
+    }
   };
 
-  const handleResend = () => {
+  const handleResend = async () => {
     if (resendCountdown > 0) return;
-    setResendCountdown(30);
-    toast.success('Kode OTP baru telah dikirim ulang.');
+
+    try {
+      const action = isStaffMode
+        ? isEmail ? 'email_login' : 'phone_login'
+        : isEmail ? 'email_otp' : 'phone_otp';
+      await authServiceClient.requestOtp(identifier, action);
+      setResendCountdown(30);
+      toast.success('Kode OTP baru telah dikirim ulang.');
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Gagal mengirim ulang OTP';
+      toast.error(msg);
+    }
   };
+
+  if (!identifier) {
+    return (
+      <Card className="shadow-xs">
+        <CardContent className="p-6 text-center text-sm text-muted-foreground">
+          Memuat verifikasi OTP...
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="shadow-xs">
       <CardHeader>
-        <CardTitle>Verifikasi Login Anda</CardTitle>
+        <CardTitle>
+          {isStaffMode ? 'Verifikasi Login Karyawan' : 'Verifikasi Login Anda'}
+        </CardTitle>
         <CardDescription>
-          Masukkan kode verifikasi 6 digit yang dikirim via WhatsApp/SMS ke nomor:{' '}
-          <span className="font-medium text-foreground">{phoneParam}</span>.
+          Masukkan kode verifikasi 6 digit yang dikirim{' '}
+          {isEmail ? 'via email' : 'via WhatsApp/SMS'} ke:{' '}
+          <span className="font-medium text-foreground">{identifier}</span>.
         </CardDescription>
       </CardHeader>
 
@@ -93,9 +239,12 @@ function OtpForm() {
               </div>
 
               <FieldDescription>
-                Tidak dapat mengakses nomor ini lagi?{' '}
-                <Link href="/verifikasi" className="underline underline-offset-4 hover:text-primary">
-                  Ubah nomor handphone
+                Tidak dapat mengakses ini lagi?{' '}
+                <Link
+                  href={isStaffMode ? '/verifikasi?mode=staff' : '/verifikasi'}
+                  className="underline underline-offset-4 hover:text-primary"
+                >
+                  Ganti nomor/email
                 </Link>
               </FieldDescription>
             </Field>
@@ -111,10 +260,11 @@ function OtpForm() {
 
       <CardFooter className="border-t pt-4">
         <Link
-          href="/verifikasi"
+          href={isStaffMode ? '/login' : '/verifikasi'}
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
-          <ArrowLeft className="size-4" /> Kembali ke verifikasi nomor
+          <ArrowLeft className="size-4" />
+          {isStaffMode ? 'Kembali ke login' : 'Kembali ke verifikasi'}
         </Link>
       </CardFooter>
     </Card>
@@ -134,7 +284,7 @@ export default function OtpPage() {
             fallback={
               <Card className="shadow-xs">
                 <CardContent className="p-6 text-center text-sm text-muted-foreground">
-                  Memuat verifikasi OTP...
+                  Memuat form verifikasi...
                 </CardContent>
               </Card>
             }

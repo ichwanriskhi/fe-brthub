@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
@@ -16,16 +17,62 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ModeToggle } from '@/components/shared/ModeToggle';
 import { cn } from '@/lib/utils';
+import { authServiceClient } from '@/lib/api/auth-service';
 import { Bell, FilePlus2, Files, LogOut, User } from 'lucide-react';
+
+interface UserProfile {
+  id: string;
+  full_name: string;
+  email: string | null;
+  phone_number: string | null;
+}
 
 const NAV_ITEMS = [
   { href: '/report/new', label: 'Buat Laporan', icon: FilePlus2 },
-  { href: '/laporan', label: 'Laporan Saya', icon: Files },
+  { href: '/laporan',    label: 'Laporan Saya',  icon: Files },
 ];
+
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .map(w => w[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase() || '?';
+}
 
 export function ReporterNavbar() {
   const pathname = usePathname();
-  const router = useRouter();
+  const router   = useRouter();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+
+  // Read user profile from localStorage (written after OTP verify)
+  useEffect(() => {
+    const raw = localStorage.getItem('user_profile');
+    if (raw) {
+      try { setProfile(JSON.parse(raw)); } catch { /* ignore */ }
+    }
+  }, []);
+
+  const displayName    = profile?.full_name   || 'Pengguna';
+  const displayContact = profile?.email       || profile?.phone_number || '';
+  const initials       = getInitials(displayName);
+
+  const handleLogout = async () => {
+    const token = localStorage.getItem('auth_token');
+
+    // Revoke the Auth Service token (best-effort) and clear the reporter
+    // session cookie so the proxy locks the protected pages again.
+    if (token) {
+      authServiceClient.logout(token).catch(() => {});
+    }
+    fetch('/api/session', { method: 'DELETE' }).catch(() => {});
+
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('user_profile');
+    sessionStorage.removeItem('reporter_data');
+    router.push('/login');
+  };
 
   return (
     <header className="sticky top-0 z-40 w-full shrink-0 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -74,15 +121,17 @@ export function ReporterNavbar() {
               render={<Button variant="ghost" size="icon" className="rounded-full" />}
             >
               <Avatar>
-                <AvatarFallback>DP</AvatarFallback>
+                <AvatarFallback>{initials}</AvatarFallback>
               </Avatar>
               <span className="sr-only">Menu profil</span>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuGroup>
                 <DropdownMenuLabel className="font-normal">
-                  <span className="block text-sm font-semibold">Dimas Pelapor</span>
-                  <span className="block text-sm text-muted-foreground">081234567890</span>
+                  <span className="block text-sm font-semibold">{displayName}</span>
+                  {displayContact && (
+                    <span className="block text-xs text-muted-foreground truncate">{displayContact}</span>
+                  )}
                 </DropdownMenuLabel>
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
@@ -102,13 +151,7 @@ export function ReporterNavbar() {
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() => {
-                    sessionStorage.removeItem('brt_user_phone');
-                    router.push('/');
-                  }}
-                >
+                <DropdownMenuItem variant="destructive" onClick={handleLogout}>
                   <LogOut />
                   <span>Keluar</span>
                 </DropdownMenuItem>
@@ -118,7 +161,7 @@ export function ReporterNavbar() {
         </div>
       </div>
 
-      {/* Menu mobile: hanya ikon label ringkas */}
+      {/* Mobile nav */}
       <nav className="flex items-center gap-1 border-t px-4 py-2 md:hidden">
         {NAV_ITEMS.map((item) => {
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);

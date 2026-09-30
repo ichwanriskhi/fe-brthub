@@ -17,54 +17,45 @@ import { AuthGuard } from '@/lib/auth/auth-guard';
 
 const NAV_GROUPS: NavGroup[] = [
   {
-    label: 'Antrean Kerja',
+    label: 'Antrean Persetujuan',
     items: [
-      { href: '/reviewer', label: 'Dashboard', icon: LayoutDashboard },
-      { href: '/reviewer/tinjauan-awal', label: 'Tinjauan Awal', icon: ClipboardCheck },
+      { href: '/approver', label: 'Dashboard', icon: LayoutDashboard },
+      { href: '/approver/persetujuan-tiket', label: 'Persetujuan Tiket', icon: ClipboardCheck },
+      { href: '/approver/persetujuan-penutupan', label: 'Persetujuan Penutupan', icon: CheckSquare },
     ],
   },
   {
     label: 'Data',
-    items: [{ href: '/reviewer/riwayat', label: 'Arsip & Riwayat', icon: Archive }],
+    items: [{ href: '/approver/riwayat', label: 'Arsip & Riwayat', icon: Archive }],
   },
 ];
 
 const ROUTE_LABELS: Record<string, string> = {
-  '/reviewer': 'Dashboard',
-  '/reviewer/tinjauan-awal': 'Tinjauan Awal',
-  '/reviewer/tinjauan-akhir': 'Tinjauan Akhir',
-  '/reviewer/penutupan': 'Penutupan Akhir',
-  '/reviewer/riwayat': 'Arsip & Riwayat',
+  '/approver': 'Dashboard',
+  '/approver/persetujuan-tiket': 'Persetujuan Tiket',
+  '/approver/persetujuan-penutupan': 'Persetujuan Penutupan',
+  '/approver/riwayat': 'Arsip & Riwayat',
 };
 
 // ─── Custom breadcrumb ────────────────────────────────────────────────────────
 
-function ReviewerBreadcrumb({ pathname }: { pathname: string }) {
+function ApproverBreadcrumb({ pathname }: { pathname: string }) {
   const segments = pathname.split('/').filter(Boolean);
   const isTicketDetail = segments[1] === 'tiket' && segments.length >= 3;
-  const isFinalReview = isTicketDetail && segments[3] === 'tinjauan-akhir';
-  const isFinalClosure = isTicketDetail && segments[3] === 'penutupan';
+  const isClosure = segments[1] === 'persetujuan-penutupan' || (isTicketDetail && segments[3] === 'penutupan');
 
   let crumbs: { href: string; label: string; isLast: boolean }[] = [];
   if (isTicketDetail) {
     crumbs = [
-      { href: '/reviewer', label: 'Dashboard', isLast: false },
+      { href: '/approver', label: 'Dashboard', isLast: false },
       {
-        href: isFinalClosure
-          ? '/reviewer/penutupan'
-          : isFinalReview
-          ? '/reviewer/tinjauan-akhir'
-          : '/reviewer/tinjauan-awal',
-        label: isFinalClosure
-          ? 'Penutupan Akhir'
-          : isFinalReview
-          ? 'Tinjauan Akhir'
-          : 'Tinjauan Awal',
+        href: isClosure ? '/approver/persetujuan-penutupan' : '/approver/persetujuan-tiket',
+        label: isClosure ? 'Persetujuan Penutupan' : 'Persetujuan Tiket',
         isLast: false,
       },
       {
         href: pathname,
-        label: isFinalClosure ? 'Penutupan Akhir' : isFinalReview ? 'Verifikasi Akhir' : 'Detail Tiket',
+        label: 'Detail Tiket',
         isLast: true,
       },
     ];
@@ -98,21 +89,20 @@ function ReviewerBreadcrumb({ pathname }: { pathname: string }) {
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
-export default function ReviewerLayout({ children }: { children: React.ReactNode }) {
+export default function ApproverLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   // Badge counts will be populated from API in a future iteration.
-  // For now, we show empty counts to avoid depending on MOCK_TICKETS.
   const badgeCounts: Record<string, number> = {};
 
   return (
-    <AuthGuard role="reviewer">
+    <AuthGuard role="approver">
       <AppLayout
         navGroups={NAV_GROUPS}
         routeLabels={ROUTE_LABELS}
         badgeCounts={badgeCounts}
-        rootHref="/reviewer"
-        renderBreadcrumb={(p) => <ReviewerBreadcrumb pathname={p} />}
+        rootHref="/approver"
+        renderBreadcrumb={(p) => <ApproverBreadcrumb pathname={p} />}
       >
         {children}
       </AppLayout>

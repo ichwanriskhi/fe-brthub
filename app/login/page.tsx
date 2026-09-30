@@ -10,26 +10,73 @@ import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSeparator } from 
 import { ModeToggle } from '@/components/shared/ModeToggle';
 import { ArrowLeft, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
+import { authServiceClient } from '@/lib/api/auth-service';
+import { brthubApi, deriveRoles, resolveRoleRedirect } from '@/lib/api/brthub-api';
+import { useAuth } from '@/lib/auth/auth-context';
+import type { AuthUser } from '@/lib/auth/auth-context';
+
+const BRTHUB_APP_ID = 'brthub_client_SAypfMmFdNpzizRcKbCX';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [phone, setPhone] = useState('');
+  const { login } = useAuth();
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!phone || !password) {
-      toast.error('Mohon lengkapi nomor handphone dan password');
+    if (!identifier || !password) {
+      toast.error('Mohon lengkapi email/nomor handphone dan password');
       return;
     }
 
     setIsLoading(true);
-    setTimeout(() => {
+    try {
+      // 1. Login via Auth Service (email atau nomor HP + password)
+      const loginResp = await authServiceClient.loginWithPassword(identifier, password, BRTHUB_APP_ID);
+
+      const accessToken = loginResp.data?.access_token;
+      const refreshToken = loginResp.data?.refresh_token;
+      if (!loginResp.success || !accessToken || !refreshToken) {
+        throw new Error(loginResp.message || 'Email/nomor atau password salah.');
+      }
+
+      // 2. Ambil profil + roles dari be-brthub
+      const meData = await brthubApi.getMe(accessToken);
+
+      if (!meData.success) {
+        throw new Error('Akun tidak ditemukan di BRTHub. Hubungi admin untuk pendaftaran akun.');
+      }
+
+      const roles = deriveRoles(
+        meData.brthub?.roles ?? [],
+        meData.brthub?.employee_profile ?? null,
+      );
+      if (roles.length === 0) {
+        throw new Error('Akun Anda belum memiliki peran di BRTHub. Hubungi admin.');
+      }
+
+      const authUser: AuthUser = {
+        uuid: meData.user.uuid,
+        full_name: meData.user.full_name,
+        email: meData.user.email,
+        phone_number: meData.user.phone_number,
+        roles,
+        employee_profile: meData.brthub?.employee_profile ?? null,
+      };
+
+      // Simpan via AuthContext (konsisten dengan OTP flow)
+      login(accessToken, refreshToken, authUser);
+
+      const destination = resolveRoleRedirect(roles, null);
+      toast.success(`Login berhasil! Selamat datang, ${meData.user.full_name}.`);
+      router.push(destination);
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Login gagal. Coba lagi.');
+    } finally {
       setIsLoading(false);
-      toast.success('Login berhasil sebagai Reviewer');
-      router.push('/reviewer');
-    }, 800);
+    }
   };
 
   return (
@@ -44,41 +91,41 @@ export default function LoginPage() {
             <CardHeader>
               <CardTitle>Masuk ke BRTHub</CardTitle>
               <CardDescription>
-                Portal login khusus staf internal, reviewer, dan tim teknis BRT.
+                Portal login petugas internal BRTHub.
               </CardDescription>
             </CardHeader>
 
             <CardContent>
-              <form onSubmit={handleSubmit}>
-                <FieldGroup>
-                  <Field>
-                    <FieldLabel htmlFor="phone">Nomor Handphone</FieldLabel>
-                    <Input
-                      id="phone"
-                      type="tel"
-                      placeholder="08123456789"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      autoComplete="tel"
-                    />
-                  </Field>
+                          <form onSubmit={handleSubmit}>
+                            <FieldGroup>
+                              <Field>
+                                <FieldLabel htmlFor="identifier">Email / Nomor Handphone</FieldLabel>
+                                <Input
+                                  id="identifier"
+                                  type="text"
+                                  placeholder="email@domain.com atau 08123456789"
+                                  value={identifier}
+                                  onChange={(e) => setIdentifier(e.target.value)}
+                                  autoComplete="email"
+                                />
+                              </Field>
 
-                  <Field>
-                    <div className="flex items-center justify-between">
-                      <FieldLabel htmlFor="password">Password</FieldLabel>
-                      <Link href="#" className="text-sm underline-offset-4 hover:underline">
-                        Lupa password?
-                      </Link>
-                    </div>
-                    <Input
-                      id="password"
-                      type="password"
-                      placeholder="Masukkan password Anda"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      autoComplete="current-password"
-                    />
-                  </Field>
+                              <Field>
+                                <div className="flex items-center justify-between">
+                                  <FieldLabel htmlFor="password">Password</FieldLabel>
+                                  <Link href="#" className="text-sm underline-offset-4 hover:underline">
+                                    Lupa password?
+                                  </Link>
+                                </div>
+                                <Input
+                                  id="password"
+                                  type="password"
+                                  placeholder="Masukkan password Anda"
+                                  value={password}
+                                  onChange={(e) => setPassword(e.target.value)}
+                                  autoComplete="current-password"
+                                />
+                              </Field>
 
                   <Field>
                     <Button type="submit" disabled={isLoading} className="w-full">
@@ -91,22 +138,22 @@ export default function LoginPage() {
               <FieldSeparator className="my-6">atau</FieldSeparator>
 
               <Button variant="outline" className="w-full" asChild>
-                <Link href="/verifikasi">
+                <Link href="/verifikasi?mode=staff">
                   <Smartphone data-icon="inline-start" />
                   Masuk menggunakan kode OTP
                 </Link>
               </Button>
             </CardContent>
 
-            <CardFooter className="flex-col items-start gap-1 border-t">
+            <CardFooter className="flex-row items-start gap-1 border-t">
               <p className="text-sm text-muted-foreground">
-                Bukan karyawan internal atau hanya ingin melaporkan kendala?
+                Hanya ingin melaporkan kendala?
               </p>
               <Link
                 href="/verifikasi"
                 className="text-sm font-medium text-primary underline-offset-4 hover:underline"
               >
-                Lapor tanpa akun password
+                Klik di sini
               </Link>
             </CardFooter>
           </Card>

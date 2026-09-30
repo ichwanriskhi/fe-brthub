@@ -88,9 +88,9 @@ export default function AdminTicketActionPage() {
                 { value: 'IN_PROGRESS', label: 'Diproses' },
               ]},
               { key: 'priority', label: 'Prioritas', options: [
-                { value: 'A', label: 'A (Critical)' },
-                { value: 'B', label: 'B (High)' },
-                { value: 'C', label: 'C (Normal)' },
+                { value: 'A', label: 'A (Tinggi)' },
+                { value: 'B', label: 'B (Normal)' },
+                { value: 'C', label: 'C (Rendah)' },
               ]},
             ]}
             filterValues={filterValues}

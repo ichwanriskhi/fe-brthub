@@ -1,16 +1,28 @@
 'use client';
 
-import { useState } from 'react';
-import { MOCK_CUSTOMERS } from '@/lib/mock/admin';
-import { customerTicketStats } from '@/lib/mock/analytics';
+import { useEffect, useState } from 'react';
+import {
+  getAdminCustomers,
+  toCustomerEntry,
+  type CustomerEntry,
+} from '@/lib/api/admin-customers';
 import { TableToolbar, type TableFilterValues } from '@/components/shared/TableToolbar';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from '@/components/ui/pagination';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
 import { CheckCircle2, Clock3, Inbox, MapPin, Phone, Plus, ExternalLink, Users } from 'lucide-react';
 import { StatisticsCard } from '@/components/shared/StatisticsCard';
+import { toast } from 'sonner';
 
 const ITEMS_PER_PAGE = 10;
 
@@ -18,10 +30,42 @@ export default function AdminPelangganPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [customers, setCustomers] = useState<CustomerEntry[]>([]);
+  const [summary, setSummary] = useState({
+    totalCustomers: 0,
+    customersWithTickets: 0,
+    totalTickets: 0,
+    activeTickets: 0,
+    resolvedTickets: 0,
+  });
 
   const filterValues: TableFilterValues = { status: statusFilter };
 
-  const filtered = MOCK_CUSTOMERS.filter((c) => {
+  const loadCustomers = async () => {
+    setLoading(true);
+    try {
+      const res = await getAdminCustomers({ per_page: 200 });
+      setCustomers(res.data.map(toCustomerEntry));
+      setSummary({
+        totalCustomers: res.summary.total_customers,
+        customersWithTickets: res.summary.customers_with_tickets,
+        totalTickets: res.summary.total_tickets,
+        activeTickets: res.summary.active_tickets,
+        resolvedTickets: res.summary.resolved_tickets,
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Gagal memuat data pelanggan.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCustomers();
+  }, []);
+
+  const filtered = customers.filter((c) => {
     const q = search.toLowerCase().trim();
     const matchesSearch =
       !q ||
@@ -30,17 +74,9 @@ export default function AdminPelangganPage() {
       c.phone.includes(q) ||
       (c.address ?? '').toLowerCase().includes(q);
     const matchesStatus =
-      !statusFilter ||
-      (statusFilter === 'ACTIVE' ? c.isActive : !c.isActive);
+      !statusFilter || (statusFilter === 'ACTIVE' ? c.isActive : !c.isActive);
     return matchesSearch && matchesStatus;
   });
-
-  // Aggregate stats over all customers
-  const allStats = MOCK_CUSTOMERS.map((c) => customerTicketStats(c.id));
-  const totalTickets = allStats.reduce((s, x) => s + x.total, 0);
-  const activeTickets = allStats.reduce((s, x) => s + x.active, 0);
-  const resolvedTickets = allStats.reduce((s, x) => s + x.resolved, 0);
-  const customersWithTickets = MOCK_CUSTOMERS.filter((c) => customerTicketStats(c.id).total > 0).length;
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
   const safePage = Math.min(currentPage, totalPages);
@@ -64,9 +100,8 @@ export default function AdminPelangganPage() {
 
   const goToPage = (p: number) => setCurrentPage(Math.min(Math.max(1, p), totalPages));
 
-  const TicketChips = ({ customerId }: { customerId: string }) => {
-    const stats = customerTicketStats(customerId);
-    if (stats.total === 0) {
+  const TicketChips = ({ customerId, tickets }: { customerId: string; tickets: CustomerEntry['tickets'] }) => {
+    if (tickets.total === 0) {
       return <span className="text-xs text-muted-foreground">Belum ada tiket</span>;
     }
     return (
@@ -75,33 +110,70 @@ export default function AdminPelangganPage() {
         className="inline-flex flex-wrap items-center gap-1.5 text-xs"
         title="Lihat tiket milik customer ini"
       >
-        {stats.active > 0 && (
-          <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400">{stats.active} aktif</Badge>
+        {tickets.active > 0 && (
+          <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400">{tickets.active} aktif</Badge>
         )}
-        {stats.resolved > 0 && (
-          <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">{stats.resolved} selesai</Badge>
+        {tickets.resolved > 0 && (
+          <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">{tickets.resolved} selesai</Badge>
         )}
-        <span className="font-medium text-foreground">total {stats.total}</span>
+        <span className="font-medium text-foreground">total {tickets.total}</span>
         <ExternalLink className="size-3 text-muted-foreground" />
       </a>
     );
   };
 
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-6">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i} className="h-24 animate-pulse bg-muted/40" />
+          ))}
+        </div>
+        <Card className="h-96 animate-pulse bg-muted/40" />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatisticsCard label="Total Pelanggan" value={String(MOCK_CUSTOMERS.length)} subtitle={`${customersWithTickets} pernah melapor`} icon={Users} />
-        <StatisticsCard label="Total Tiket Customer" value={String(totalTickets)} subtitle="dari semua pelanggan" icon={Inbox} />
-        <StatisticsCard label="Tiket Aktif" value={String(activeTickets)} subtitle="belum selesai" icon={Clock3} />
-        <StatisticsCard label="Tiket Selesai" value={String(resolvedTickets)} subtitle="closed / rejected" icon={CheckCircle2} showTrend />
+        <StatisticsCard
+          label="Total Pelanggan"
+          value={String(summary.totalCustomers)}
+          subtitle={`${summary.customersWithTickets} pernah melapor`}
+          icon={Users}
+        />
+        <StatisticsCard
+          label="Total Tiket Customer"
+          value={String(summary.totalTickets)}
+          subtitle="dari semua pelanggan"
+          icon={Inbox}
+        />
+        <StatisticsCard
+          label="Tiket Aktif"
+          value={String(summary.activeTickets)}
+          subtitle="belum selesai"
+          icon={Clock3}
+        />
+        <StatisticsCard
+          label="Tiket Selesai"
+          value={String(summary.resolvedTickets)}
+          subtitle="closed / rejected"
+          icon={CheckCircle2}
+          showTrend
+        />
       </div>
 
       <Card className="w-full gap-0 overflow-hidden p-0">
         <CardContent className="p-4">
           <TableToolbar
             searchValue={search}
-            onSearchChange={(v) => { setSearch(v); setCurrentPage(1); }}
+            onSearchChange={(v) => {
+              setSearch(v);
+              setCurrentPage(1);
+            }}
             searchPlaceholder="Cari nama, kode, telepon, alamat..."
             filters={[
               {
@@ -120,18 +192,6 @@ export default function AdminPelangganPage() {
           />
         </CardContent>
 
-        <div className="flex items-center justify-between gap-3 px-6 py-4 border-t">
-          <div>
-            <p className="text-sm font-medium">Data Customer</p>
-            <p className="text-xs text-muted-foreground">
-              {filtered.length} pelanggan • {customersWithTickets} dengan tiket
-            </p>
-          </div>
-          <Button size="sm" onClick={() => { /* mock — belum tersimpan */ }}>
-            <Plus className="size-4" />
-            Customer Baru
-          </Button>
-        </div>
 
         {/* Mobile card view */}
         <div className="md:hidden px-4 pb-4">
@@ -153,10 +213,16 @@ export default function AdminPelangganPage() {
                       </p>
                     )}
                     <div className="pt-1">
-                      <TicketChips customerId={c.id} />
+                      <TicketChips customerId={c.id} tickets={c.tickets} />
                     </div>
                   </div>
-                  <Badge className={c.isActive ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-muted/50 text-muted-foreground'}>
+                  <Badge
+                    className={
+                      c.isActive
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-muted/50 text-muted-foreground'
+                    }
+                  >
                     {c.isActive ? 'Aktif' : 'Nonaktif'}
                   </Badge>
                 </div>
@@ -191,19 +257,32 @@ export default function AdminPelangganPage() {
                     <div className="space-y-0.5">
                       <p className="text-sm font-medium">{c.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        Terdaftar {new Date(c.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        Terdaftar{' '}
+                        {new Date(c.createdAt).toLocaleDateString('id-ID', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                        })}
                       </p>
                     </div>
                   </TableCell>
-                  <TableCell className="px-6 py-3 font-mono text-xs text-muted-foreground">{c.phone}</TableCell>
+                  <TableCell className="px-6 py-3 font-mono text-xs text-muted-foreground">
+                    {c.phone}
+                  </TableCell>
                   <TableCell className="max-w-64 px-6 py-3 text-xs text-muted-foreground">
                     <span className="line-clamp-2">{c.address ?? '-'}</span>
                   </TableCell>
                   <TableCell className="px-6 py-3">
-                    <TicketChips customerId={c.id} />
+                    <TicketChips customerId={c.id} tickets={c.tickets} />
                   </TableCell>
                   <TableCell className="px-6 py-3">
-                    <Badge className={c.isActive ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-muted/50 text-muted-foreground'}>
+                    <Badge
+                      className={
+                        c.isActive
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                          : 'bg-muted/50 text-muted-foreground'
+                      }
+                    >
                       {c.isActive ? 'Aktif' : 'Nonaktif'}
                     </Badge>
                   </TableCell>

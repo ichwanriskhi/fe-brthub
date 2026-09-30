@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { MOCK_TICKETS, MOCK_CHAT } from '@/lib/mock/data';
-import type { TicketStatus } from '@/lib/types/ticket';
+import { getMyTickets } from '@/lib/api/tickets';
+import { reporterChatId, useReporterUnread } from '@/components/providers/ReporterUnreadProvider';
+import type { Ticket, TicketStatus } from '@/lib/types/ticket';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { TicketChatDrawer } from '@/components/shared/TicketChatDrawer';
 import { Card, CardContent } from '@/components/ui/card';
@@ -33,12 +34,6 @@ const STATUS_OPTIONS: { value: TicketStatus; label: string }[] = [
 
 const TICKETS_PER_PAGE = 10;
 
-/** Mock unread count — tiket dengan id tertentu punya pesan belum terbaca */
-const MOCK_UNREAD: Record<string, number> = {
-  [MOCK_TICKETS[0]?.id ?? '']: 2,
-  [MOCK_TICKETS[2]?.id ?? '']: 1,
-};
-
 export default function ReportHistoryPage() {
   const [filterValues, setFilterValues] = useState<TableFilterValues>({});
   const [searchQuery, setSearchQuery] = useState('');
@@ -48,12 +43,41 @@ export default function ReportHistoryPage() {
   // State chat drawer per tiket
   const [chatTicketId, setChatTicketId] = useState<string | null>(null);
 
+  // ── Data asli dari backend (laporan milik reporter yang login) ──
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const { unread } = useReporterUnread();
+
+  useEffect(() => {
+    let cancelled = false;
+    getMyTickets()
+      .then((data) => {
+        if (cancelled) return;
+        setTickets(data);
+        setLoadError(null);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setLoadError(err instanceof Error ? err.message : 'Gagal memuat laporan');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Pesan belum dibaca percakapan reporter<->admin untuk satu tiket. */
+  const unreadFor = (ticketId: string) => unread[reporterChatId(ticketId)] ?? 0;
+
   const setFilter = (key: string, value: string | null) => {
     setFilterValues((prev) => ({ ...prev, [key]: value }));
     setCurrentPage(1);
   };
 
-  const filteredTickets = MOCK_TICKETS.filter((ticket) => {
+  const filteredTickets = tickets.filter((ticket) => {
     const matchesStatus = !filterValues.status || ticket.status === filterValues.status;
     const matchesType = !filterValues.type || ticket.ticketType === filterValues.type;
     const matchesCategory = !filterValues.category || ticket.category === filterValues.category;
@@ -76,11 +100,6 @@ export default function ReportHistoryPage() {
   const totalPages = Math.max(1, Math.ceil(filteredTickets.length / TICKETS_PER_PAGE));
   const safePage = Math.min(currentPage, totalPages);
   const paginatedTickets = filteredTickets.slice((safePage - 1) * TICKETS_PER_PAGE, safePage * TICKETS_PER_PAGE);
-
-  const changeFilter = (fn: () => void) => {
-    fn();
-    setCurrentPage(1);
-  };
 
   return (
     <div className="container mx-auto px-4 py-6 md:py-10 max-w-5xl space-y-6">
@@ -111,7 +130,7 @@ export default function ReportHistoryPage() {
                 { value: 'COMPLAINT', label: 'Complaint' },
                 { value: 'INQUIRY', label: 'Inquiry' },
               ] },
-              { key: 'category', label: 'Kategori', options: [...new Set(MOCK_TICKETS.map((t) => t.category))].map((c) => ({ value: c, label: c })) },
+              { key: 'category', label: 'Kategori', options: [...new Set(tickets.map((t) => t.category))].map((c) => ({ value: c, label: c })) },
             ]}
             filterValues={filterValues}
             onFilterChange={setFilter}
@@ -132,21 +151,31 @@ export default function ReportHistoryPage() {
           <CardContent className="space-y-3">
             <FileText className="size-8 text-muted-foreground mx-auto" />
             <div>
-              <p className="text-sm font-semibold">Tidak ada laporan ditemukan</p>
-              <p className="text-xs text-muted-foreground mt-1">Coba ubah filter status atau kata kunci pencarian.</p>
+              <p className="text-sm font-semibold">
+                {isLoading ? 'Memuat laporan…' : loadError ? 'Gagal memuat laporan' : 'Tidak ada laporan ditemukan'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {isLoading
+                  ? 'Mengambil data dari server…'
+                  : loadError
+                  ? loadError
+                  : 'Coba ubah filter status atau kata kunci pencarian.'}
+              </p>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setFilterValues({});
-                setSearchQuery('');
-                setDateRange(undefined);
-                setCurrentPage(1);
-              }}
-            >
-              Reset Filter
-            </Button>
+            {!isLoading && !loadError && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setFilterValues({});
+                  setSearchQuery('');
+                  setDateRange(undefined);
+                  setCurrentPage(1);
+                }}
+              >
+                Reset Filter
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -154,7 +183,7 @@ export default function ReportHistoryPage() {
           {/* Mobile */}
           <div className="sm:hidden space-y-3">
             {paginatedTickets.map((ticket) => {
-              const unread = MOCK_UNREAD[ticket.id] ?? 0;
+              const unread = unreadFor(ticket.id);
               return (
                 <Card key={ticket.id}>
                   <CardContent className="p-4 space-y-3">
@@ -219,7 +248,7 @@ export default function ReportHistoryPage() {
               </TableHeader>
               <TableBody>
                 {paginatedTickets.map((ticket) => {
-                  const unread = MOCK_UNREAD[ticket.id] ?? 0;
+                  const unread = unreadFor(ticket.id);
                   return (
                     <TableRow key={ticket.id}>
                       <TableCell className="px-6 py-3 font-mono text-xs text-muted-foreground whitespace-nowrap">{ticket.id}</TableCell>

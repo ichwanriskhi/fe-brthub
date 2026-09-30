@@ -1,8 +1,9 @@
 'use client';
 
-import { use, useState } from 'react';
+import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { MOCK_TICKETS } from '@/lib/mock/data';
+import { getMyTicket } from '@/lib/api/tickets';
+import type { Ticket } from '@/lib/types/ticket';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { ClaimItemsTable } from '@/components/shared/ClaimItemsTable';
 import { TicketChatDrawer } from '@/components/shared/TicketChatDrawer';
@@ -25,7 +26,6 @@ import {
   FileOutput,
   RefreshCwIcon,
   Clock,
-  History,
   Hammer,
   ChevronDown,
   ChevronUp,
@@ -52,16 +52,58 @@ function getStageIndex(status: string) {
 
 export default function TicketDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const ticket = MOCK_TICKETS.find(t => t.id === id) || MOCK_TICKETS[0];
+  const [ticket, setTicket] = useState<Ticket | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [showAllProgress, setShowAllProgress] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getMyTicket(id)
+      .then((data) => {
+        if (cancelled) return;
+        setTicket(data);
+        setLoadError(null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setLoadError(error instanceof Error ? error.message : 'Gagal memuat detail laporan.');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  if (isLoading || !ticket) {
+    return (
+      <div className="container mx-auto max-w-5xl px-4 py-8">
+        <Card>
+          <CardContent className="py-12 text-center text-sm text-muted-foreground">
+            {isLoading ? 'Memuat detail laporan…' : loadError ?? 'Laporan tidak ditemukan.'}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   const PROGRESS_SHOW_LIMIT = 3;
 
   const currentStageIndex = getStageIndex(ticket.status);
   const isRejected = ticket.status === 'REJECTED';
   const isClosed = ticket.status === 'CLOSED';
-  const hasResolution = !!ticket.resolutionSummary;
+
+  // Ambil resolusi terakhir yang sudah disetujui (APPROVED) untuk ditampilkan ke reporter
+  const approvedResolutions = (ticket.resolutions ?? []).filter((r) => r.reviewDecision === 'APPROVED');
+  const latestApprovedResolution = approvedResolutions.length > 0
+    ? approvedResolutions[approvedResolutions.length - 1]
+    : null;
+  const hasResolution = isClosed && latestApprovedResolution !== null;
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-5xl space-y-6">
@@ -106,14 +148,24 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
           </div>
 
           <div className="flex flex-wrap gap-x-6 gap-y-3 border-t pt-4 text-xs text-muted-foreground">
-            <div className="flex items-center gap-1.5">
-              <Building className="size-4 text-muted-foreground" />
-              <span>Pelanggan: <strong className="font-semibold text-foreground">{ticket.customerData?.name || ticket.reporterName}</strong></span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <FileText className="size-4 text-muted-foreground" />
-              <span>SO: <strong className="font-semibold text-foreground">{ticket.soNumber || '-'}</strong></span>
-            </div>
+            {ticket.isReportForCustomer && ticket.customerData?.name && (
+              <div className="flex items-center gap-1.5">
+                <Building className="size-4 text-muted-foreground" />
+                <span>Pelanggan: <strong className="font-semibold text-foreground">{ticket.customerData.name}</strong></span>
+              </div>
+            )}
+            {ticket.category === 'Klaim Distribusi & Pengiriman' && ticket.soNumber && (
+              <div className="flex items-center gap-1.5">
+                <FileText className="size-4 text-muted-foreground" />
+                <span>SO: <strong className="font-semibold text-foreground">{ticket.soNumber}</strong></span>
+              </div>
+            )}
+            {ticket.category === 'Klaim Distribusi & Pengiriman' && ticket.salesName && (
+              <div className="flex items-center gap-1.5">
+                <User className="size-4 text-muted-foreground" />
+                <span>Sales: <strong className="font-semibold text-foreground">{ticket.salesName}</strong></span>
+              </div>
+            )}
             <div className="flex items-center gap-1.5">
               <User className="size-4 text-muted-foreground" />
               <span>Pelapor: <strong className="font-semibold text-foreground">{ticket.reporterName}</strong></span>
@@ -277,33 +329,33 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
             <div>
               <span className="text-xs font-semibold text-foreground block mb-1">Ringkasan Tindakan</span>
               <p className="text-sm text-muted-foreground leading-relaxed bg-emerald-50 dark:bg-emerald-950/30 p-3.5 rounded-lg border border-emerald-200 dark:border-emerald-800">
-                {ticket.resolutionSummary}
+                {latestApprovedResolution?.summary}
               </p>
             </div>
 
             {/* Detail */}
-            {ticket.resolutionDetail && (
+            {latestApprovedResolution?.detail && (
               <>
                 <Separator />
                 <div>
                   <span className="text-xs font-semibold text-foreground block mb-1">Detail Penyelesaian</span>
                   <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">
-                    {ticket.resolutionDetail}
+                    {latestApprovedResolution.detail}
                   </p>
                 </div>
               </>
             )}
 
             {/* Lampiran Resolusi */}
-            {ticket.resolutionAttachments && ticket.resolutionAttachments.length > 0 && (
+            {latestApprovedResolution?.attachments && latestApprovedResolution.attachments.length > 0 && (
               <>
                 <Separator />
                 <div>
                   <span className="text-xs font-semibold text-foreground block mb-2">
-                    Lampiran Bukti Penyelesaian ({ticket.resolutionAttachments.length})
+                    Lampiran Bukti Penyelesaian ({latestApprovedResolution.attachments.length})
                   </span>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {ticket.resolutionAttachments.map((att) => (
+                    {latestApprovedResolution.attachments.map((att) => (
                       <a
                         key={att.id}
                         href={att.url}
@@ -315,77 +367,6 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
                         <span className="font-medium truncate flex-1">{att.name}</span>
                         <span className="text-[10px] text-muted-foreground">{att.size}</span>
                       </a>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* ── Timeline Riwayat Revisi ── */}
-            {ticket.resolutionCycles && ticket.resolutionCycles.length > 1 && (
-              <>
-                <Separator />
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <RefreshCwIcon className="size-4 text-amber-500" />
-                    <span className="text-xs font-semibold text-foreground">Riwayat Perbaikan Resolusi</span>
-                  </div>
-
-                  <div className="relative pl-6 space-y-4">
-                    {/* Vertical line */}
-                    <div className="absolute left-[11px] top-1.5 bottom-1.5 w-px bg-border" />
-
-                    {ticket.resolutionCycles.map((cycle, idx) => (
-                      <div key={cycle.id} className="relative">
-                        {/* Dot on timeline */}
-                        <div
-                          className={`absolute left-[-18px] top-1.5 size-2.5 rounded-full border-2 ${
-                            cycle.isCurrent
-                              ? 'border-amber-400 bg-amber-400'
-                              : idx === ticket.resolutionCycles!.length - 1
-                              ? 'border-emerald-500 bg-emerald-500'
-                              : 'border-muted-foreground/40 bg-background'
-                          }`}
-                        />
-
-                        <div className="rounded-lg border bg-muted/20 p-3.5 space-y-1.5">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-xs font-bold text-foreground">
-                              Revisi #{cycle.cycleNumber}
-                            </span>
-                            <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                              <Clock className="size-3" />
-                              {cycle.timestamp}
-                            </span>
-                            {cycle.isCurrent && (
-                              <Badge variant="outline" className="text-[10px] h-5 px-1.5 text-amber-600 border-amber-300 dark:border-amber-700">
-                                Aktif
-                              </Badge>
-                            )}
-                          </div>
-
-                          <p className="text-xs text-foreground leading-relaxed">
-                            {cycle.summary}
-                          </p>
-
-                          {cycle.detail && (
-                            <p className="text-[11px] text-muted-foreground leading-relaxed mt-1">
-                              {cycle.detail}
-                            </p>
-                          )}
-
-                          {cycle.reviewerNote && (
-                            <div className="mt-2 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-2.5">
-                              <p className="text-[10px] font-semibold text-amber-800 dark:text-amber-300 mb-0.5">
-                                Catatan Reviewer:
-                              </p>
-                              <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed">
-                                {cycle.reviewerNote}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
                     ))}
                   </div>
                 </div>
@@ -411,10 +392,18 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
                 <span className="text-muted-foreground block mb-0.5">Kategori Kendala</span>
                 <span className="font-semibold text-foreground">{ticket.category} ({ticket.subcategory})</span>
               </div>
-              <div>
-                <span className="text-muted-foreground block mb-0.5">Model Kendaraan / Armada</span>
-                <span className="font-semibold text-foreground">{ticket.vehicleModel || '-'}</span>
-              </div>
+              {ticket.category === 'Produk & Kendaraan' && (
+                <>
+                  <div>
+                    <span className="text-muted-foreground block mb-0.5">Model Kendaraan / Armada</span>
+                    <span className="font-semibold text-foreground">{ticket.vehicleModel || '-'}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block mb-0.5">Lini Produk</span>
+                    <span className="font-semibold text-foreground">{ticket.productLine || '-'}</span>
+                  </div>
+                </>
+              )}
             </div>
 
             <Separator />

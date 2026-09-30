@@ -1,8 +1,14 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
-import { MOCK_TICKETS } from '@/lib/mock/data';
+import {
+  getAdminTicketHistory,
+  type AdminTicketHistoryParams,
+} from '@/lib/api/admin-ticket-history';
+import { getMasterDataAll } from '@/lib/api/master';
+import { getAdminEmployees } from '@/lib/api/admin-employees';
+import type { Ticket } from '@/lib/types/ticket';
 import { StatusBadge, TypeBadge, PriorityBadge } from '@/components/shared/StatusBadge';
 import { StatisticsCard } from '@/components/shared/StatisticsCard';
 import { TableToolbar, type TableFilterValues } from '@/components/shared/TableToolbar';
@@ -13,13 +19,11 @@ import {
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationItem, PaginationLink, PaginationNext, PaginationPrevious,
 } from '@/components/ui/pagination';
-import { Inbox, ArrowUpRight, CheckCircle2, Clock3, BadgeCheck } from 'lucide-react';
+import { Inbox, ArrowUpRight, CheckCircle2, Clock3 } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
+import { toast } from 'sonner';
 
-const ITEMS_PER_PAGE = 10;
-
-/** Tiket selesai = CLOSED / REJECTED */
-const FINAL_STATUSES = ['CLOSED', 'REJECTED'];
+const ITEMS_PER_PAGE = 20;
 
 function getPaginationItems(currentPage: number, totalPages: number): (number | 'ellipsis')[] {
   const items: (number | 'ellipsis')[] = [];
@@ -40,56 +44,107 @@ export default function AdminTicketHistoryPage() {
   const [filterValues, setFilter] = useState<TableFilterValues>({});
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   const [currentPage, setCurrentPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [lastPage, setLastPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState({ closedCount: 0, rejectedCount: 0, totalCount: 0 });
+  const [categoryOptions, setCategoryOptions] = useState<{ value: string; label: string }[]>([]);
+  const [handlerOptions, setHandlerOptions] = useState<{ value: string; label: string }[]>([]);
 
-  const finished = useMemo(
-    () => MOCK_TICKETS.filter((t) => FINAL_STATUSES.includes(t.status)),
-    []
-  );
+  // Debounced search
+  const [searchInput, setSearchInput] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearch(searchInput);
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
-  const filtered = useMemo(() => {
-    let result = finished.filter((t) => {
-      const q = search.toLowerCase().trim();
-      const matchesSearch =
-        !q ||
-        t.id.toLowerCase().includes(q) ||
-        t.subject.toLowerCase().includes(q) ||
-        (t.soNumber && t.soNumber.toLowerCase().includes(q)) ||
-        t.reporterName.toLowerCase().includes(q) ||
-        (t.handlerName ?? '').toLowerCase().includes(q);
-      const matchesStatus = !filterValues.status || t.status === filterValues.status;
-      const matchesPriority = !filterValues.priority || t.priority === filterValues.priority;
-      const matchesType = !filterValues.type || t.ticketType === filterValues.type;
-      const matchesCategory = !filterValues.category || t.category === filterValues.category;
-      const matchesHandler = !filterValues.handler || t.handlerName === filterValues.handler;
-      const created = new Date(t.createdAt);
-      const matchesDate =
-        !dateRange?.from ||
-        (created >= new Date(dateRange.from.toDateString()) &&
-          (!dateRange.to || created <= new Date(dateRange.to.toDateString() + ' 23:59')));
-      return matchesSearch && matchesStatus && matchesPriority && matchesType && matchesCategory && matchesHandler && matchesDate;
-    });
-    return [...result].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [finished, search, filterValues, dateRange]);
+  // Load dropdown options (kategori & handler) sekali
+  useEffect(() => {
+    (async () => {
+      try {
+        const [master, employees] = await Promise.all([
+          getMasterDataAll(),
+          getAdminEmployees({ per_page: 100 }),
+        ]);
+        setCategoryOptions(
+          master.categories.map((c) => ({ value: String(c.id), label: c.name })),
+        );
+        setHandlerOptions(
+          employees.data
+            .map((e) => ({ value: String(e.id), label: e.user?.full_name ?? `Pegawai #${e.id}` }))
+            .filter((h, i, arr) => arr.findIndex((x) => x.value === h.value) === i),
+        );
+      } catch {
+        // dropdown opsional — biarkan kosong kalau gagal
+      }
+    })();
+  }, []);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+  // Load tickets dari server (server-side filter + pagination)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const params: AdminTicketHistoryParams = {
+          per_page: ITEMS_PER_PAGE,
+          page: currentPage,
+          withSummary: true,
+        };
+        if (search) params.search = search;
+        if (filterValues.status === 'CLOSED' || filterValues.status === 'REJECTED') {
+          params.status = filterValues.status;
+        }
+        if (filterValues.priority) params.priority = filterValues.priority as 'A' | 'B' | 'C';
+        if (filterValues.type) params.ticketType = filterValues.type as AdminTicketHistoryParams['ticketType'];
+        if (filterValues.category) params.categoryId = String(filterValues.category);
+        if (filterValues.handler) params.handlerId = String(filterValues.handler);
+        if (dateRange?.from) {
+          params.dateFrom = dateRange.from.toISOString().slice(0, 10);
+          if (dateRange.to) params.dateTo = dateRange.to.toISOString().slice(0, 10);
+        }
+
+        const res = await getAdminTicketHistory({ ...params, withSummary: true });
+        if (cancelled) return;
+        setTickets(res.data);
+        setLastPage(res.last_page ?? 1);
+        setTotal(res.total ?? 0);
+        const s = (res as unknown as { summary?: { closed_count?: number; rejected_count?: number; total_count?: number } }).summary;
+        if (s) {
+          setSummary({
+            closedCount: s.closed_count ?? 0,
+            rejectedCount: s.rejected_count ?? 0,
+            totalCount: s.total_count ?? 0,
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          toast.error(error instanceof Error ? error.message : 'Gagal memuat riwayat tiket.');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [search, filterValues, dateRange, currentPage]);
+
+  const totalPages = Math.max(1, lastPage);
   const safePage = Math.min(currentPage, totalPages);
-  const paginatedTickets = filtered.slice((safePage - 1) * ITEMS_PER_PAGE, safePage * ITEMS_PER_PAGE);
   const goToPage = (p: number) => setCurrentPage(Math.min(Math.max(1, p), totalPages));
 
-  const closedCount = finished.filter((t) => t.status === 'CLOSED').length;
-  const rejectedCount = finished.filter((t) => t.status === 'REJECTED').length;
-  const complaintCount = finished.filter((t) => t.ticketType === 'COMPLAINT').length;
-
   const stats = [
-    { label: 'Tiket Selesai', value: String(closedCount), subtitle: 'Total penutupan', icon: CheckCircle2 },
-    { label: 'Tiket Ditolak', value: String(rejectedCount), subtitle: 'Tidak dilanjutkan', icon: Inbox },
-    { label: 'Komplain', value: String(complaintCount), subtitle: 'Tiket selesai bertipe complaint', icon: BadgeCheck },
-    { label: 'Total Riwayat', value: String(finished.length), subtitle: 'Semua tiket selesai', icon: Clock3 },
-  ]
+    { label: 'Tiket Selesai', value: String(summary.closedCount), subtitle: 'Total penutupan', icon: CheckCircle2 },
+    { label: 'Tiket Ditolak', value: String(summary.rejectedCount), subtitle: 'Tidak dilanjutkan', icon: Inbox },
+    { label: 'Total Riwayat', value: String(summary.totalCount), subtitle: 'Selesai + ditolak', icon: Clock3 },
+  ];
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Stats cards */}
+      {/* Stats cards — tanpa card komplain */}
       <div className="grid grid-cols-2 gap-6 xl:grid-cols-4">
         {stats.map((s) => (
           <StatisticsCard key={s.label} {...s} />
@@ -99,18 +154,18 @@ export default function AdminTicketHistoryPage() {
       <Card className="w-full gap-0 overflow-hidden p-0">
         <CardContent className="p-4">
           <TableToolbar
-            searchValue={search}
-            onSearchChange={(v) => { setSearch(v); setCurrentPage(1); }}
-            searchPlaceholder="Cari ID tiket, SO, reporter, handler..."
+            searchValue={searchInput}
+            onSearchChange={(v) => { setSearchInput(v); }}
+            searchPlaceholder="Cari ID tiket, SO, subjek..."
             filters={[
               { key: 'status', label: 'Status', options: [
                 { value: 'CLOSED', label: 'Selesai' },
                 { value: 'REJECTED', label: 'Ditolak' },
               ]},
               { key: 'priority', label: 'Prioritas', options: [
-                { value: 'A', label: 'A (Critical)' },
-                { value: 'B', label: 'B (High)' },
-                { value: 'C', label: 'C (Normal)' },
+                { value: 'A', label: 'A (Tinggi)' },
+                { value: 'B', label: 'B (Normal)' },
+                { value: 'C', label: 'C (Rendah)' },
               ]},
               { key: 'type', label: 'Tipe Tiket', options: [
                 { value: 'REQUEST', label: 'Request' },
@@ -118,8 +173,8 @@ export default function AdminTicketHistoryPage() {
                 { value: 'COMPLAINT', label: 'Complaint' },
                 { value: 'INQUIRY', label: 'Inquiry' },
               ]},
-              { key: 'category', label: 'Kategori', options: [...new Set(MOCK_TICKETS.map((t) => t.category))].map((c) => ({ value: c, label: c })) },
-              { key: 'handler', label: 'Handler', options: [...new Set(MOCK_TICKETS.map((t) => t.handlerName ?? '').filter(Boolean))].map((h) => ({ value: h, label: h })) },
+              { key: 'category', label: 'Kategori', options: categoryOptions },
+              { key: 'handler', label: 'Handler', options: handlerOptions },
             ]}
             filterValues={filterValues}
             onFilterChange={(key, value) => { setFilter((prev) => ({ ...prev, [key]: value })); setCurrentPage(1); }}
@@ -128,26 +183,19 @@ export default function AdminTicketHistoryPage() {
           />
         </CardContent>
 
-        <div className="flex items-center justify-between gap-3 px-6 py-4 border-t">
-          <div>
-            <p className="text-sm font-medium">Riwayat Tiket</p>
-            <p className="text-xs text-muted-foreground">
-              {filtered.length} tiket selesai / ditolak
-            </p>
-          </div>
-        </div>
 
-        {paginatedTickets.length === 0 ? (
+
+        {!loading && tickets.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 border-t py-12 text-center">
             <Inbox className="size-8 text-muted-foreground/60" />
             <p className="text-sm font-medium">Tidak ada tiket riwayat</p>
-            <p className="text-xs text-muted-foreground">Tiket yang selesai akan tampil di sini.</p>
+            <p className="text-xs text-muted-foreground">Tiket yang selesai atau ditolak akan tampil di sini.</p>
           </div>
         ) : (
           <>
             {/* Mobile card */}
             <div className="md:hidden px-4 pb-4">
-              {paginatedTickets.map((ticket) => (
+              {tickets.map((ticket) => (
                 <div key={ticket.id} className="mb-3 rounded-lg border bg-card py-4 last:mb-0">
                   <div className="px-4 space-y-2">
                     <div className="flex items-start justify-between gap-3">
@@ -185,13 +233,12 @@ export default function AdminTicketHistoryPage() {
                     <TableHead className="bg-muted/50 px-6 py-3">Pelapor</TableHead>
                     <TableHead className="bg-muted/50 px-6 py-3">Tipe</TableHead>
                     <TableHead className="bg-muted/50 px-6 py-3">Prioritas</TableHead>
-                    <TableHead className="bg-muted/50 px-6 py-3">Handler</TableHead>
                     <TableHead className="bg-muted/50 px-6 py-3">Status</TableHead>
                     <TableHead className="bg-muted/50 px-6 py-3 text-right">Detail</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paginatedTickets.map((ticket) => (
+                  {tickets.map((ticket) => (
                     <TableRow key={ticket.id}>
                       <TableCell className="px-6 py-3 font-mono text-xs whitespace-nowrap">{ticket.id}</TableCell>
                       <TableCell className="px-6 py-3">
@@ -203,7 +250,6 @@ export default function AdminTicketHistoryPage() {
                       <TableCell className="px-6 py-3 text-sm">{ticket.reporterName}</TableCell>
                       <TableCell className="px-6 py-3"><TypeBadge ticketType={ticket.ticketType} /></TableCell>
                       <TableCell className="px-6 py-3"><PriorityBadge priority={ticket.priority} /></TableCell>
-                      <TableCell className="px-6 py-3 text-sm">{ticket.handlerName ?? '-'}</TableCell>
                       <TableCell className="px-6 py-3"><StatusBadge status={ticket.status} /></TableCell>
                       <TableCell className="px-6 py-3 text-right">
                         <Button variant="outline" size="sm" className="gap-1.5 text-xs" asChild>

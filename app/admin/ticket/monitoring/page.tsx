@@ -1,26 +1,28 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { MOCK_TICKETS } from '@/lib/mock/data';
-import { MOCK_PENDING_REPORTERS, MOCK_CATEGORIES, MOCK_PRODUCTS } from '@/lib/mock/admin';
+import {
+  getAdminTicketMonitoring,
+  type AdminTicketMonitoringParams,
+} from '@/lib/api/admin-ticket-monitoring';
+import { getMasterDataAll } from '@/lib/api/master';
+import { getAdminEmployees } from '@/lib/api/admin-employees';
+import type { Ticket } from '@/lib/types/ticket';
 import { StatusBadge, TypeBadge, PriorityBadge } from '@/components/shared/StatusBadge';
 import { TableToolbar, type TableFilterValues } from '@/components/shared/TableToolbar';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationItem, PaginationLink, PaginationNext, PaginationPrevious,
 } from '@/components/ui/pagination';
-import { Inbox, ArrowUpRight, CircleHelp, UserCheck } from 'lucide-react';
+import { Inbox, ArrowUpRight } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
+import { toast } from 'sonner';
 
-const ITEMS_PER_PAGE = 10;
-
-/** Tiket berjalan = belum CLOSED / REJECTED */
-const ACTIVE_STATUSES = ['OPEN', 'IN_PROGRESS', 'PENDING_REVIEW', 'REWORK_REQUIRED'];
+const ITEMS_PER_PAGE = 20;
 
 function getPaginationItems(currentPage: number, totalPages: number): (number | 'ellipsis')[] {
   const items: (number | 'ellipsis')[] = [];
@@ -41,119 +43,88 @@ export default function AdminTicketMonitoringPage() {
   const [filterValues, setFilter] = useState<TableFilterValues>({});
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   const [currentPage, setCurrentPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [lastPage, setLastPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [categoryOptions, setCategoryOptions] = useState<{ value: string; label: string }[]>([]);
+  const [handlerOptions, setHandlerOptions] = useState<{ value: string; label: string }[]>([]);
 
-  /**
-   * Drill-down dari Master Data (kategori/produk) & Pegawai/Customer (reporter).
-   * Query params: ?category=|product=|reporter=|customer=
-   * Saat entity aktif, tampil SEMUA status (bukan hanya berjalan) agar
-   * admin bisa tracking masalah sampai akar: aktif, selesai, dan totalnya.
-   */
-  const [entityFilter, setEntityFilter] = useState<{
-    kind: 'category' | 'product' | 'reporter' | 'customer';
-    id: string;
-  } | null>(null);
-
+  // Debounced search
+  const [searchInput, setSearchInput] = useState('');
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const kind =
-      params.get('category') ? 'category' :
-      params.get('product') ? 'product' :
-      params.get('reporter') ? 'reporter' :
-      params.get('customer') ? 'customer' : null;
-    if (kind) {
-      const id = params.get(kind) ?? '';
-      if (id) setEntityFilter({ kind, id });
-    }
+    const t = setTimeout(() => {
+      setSearch(searchInput);
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  // Load dropdown options (kategori & handler) sekali
+  useEffect(() => {
+    (async () => {
+      try {
+        const [master, employees] = await Promise.all([
+          getMasterDataAll(),
+          getAdminEmployees({ per_page: 100 }),
+        ]);
+        setCategoryOptions(
+          master.categories.map((c) => ({ value: String(c.id), label: c.name })),
+        );
+        setHandlerOptions(
+          employees.data
+            .map((e) => ({ value: String(e.id), label: e.user?.full_name ?? `Pegawai #${e.id}` }))
+            .filter((h, i, arr) => arr.findIndex((x) => x.value === h.value) === i),
+        );
+      } catch {
+        // dropdown opsional — biarkan kosong kalau gagal
+      }
+    })();
   }, []);
 
-  const entityLabel = entityFilter
-    ? entityFilter.kind === 'category'
-      ? MOCK_CATEGORIES.find((c) => c.id === entityFilter.id)?.name
-      : entityFilter.kind === 'product'
-        ? `${MOCK_PRODUCTS.find((p) => p.id === entityFilter.id)?.name ?? ''} (${MOCK_PRODUCTS.find((p) => p.id === entityFilter.id)?.productCode ?? ''})`
-        : entityFilter.kind === 'reporter'
-          ? 'Reporter: Pegawai'
-          : 'Milik Customer'
-    : null;
-
-  /** Ids kategori yang diizinkan (kategori + semua sub-nya) untuk filter category */
-  const allowedCategoryIds = useMemo(() => {
-    if (entityFilter?.kind !== 'category') return null;
-    const root = entityFilter.id;
-    const children = MOCK_CATEGORIES.filter((c) => c.parentId === root).map((c) => c.id);
-    return new Set([root, ...children]);
-  }, [entityFilter]);
-
-  const entityTicketCount = useMemo(() => {
-    if (!entityFilter) return null;
-    const all = MOCK_TICKETS.filter((t) => {
-      switch (entityFilter.kind) {
-        case 'category':
-          return t.categoryId === entityFilter.id || (t.subcategoryId != null && allowedCategoryIds?.has(t.subcategoryId));
-        case 'product':
-          return t.productId === entityFilter.id;
-        case 'reporter':
-          return t.reporterEmployeeId === entityFilter.id;
-        case 'customer':
-          return t.reporterCustomerId === entityFilter.id;
-      }
-    });
-    const active = all.filter((t) => ACTIVE_STATUSES.includes(t.status)).length;
-    return { total: all.length, active, resolved: all.length - active };
-  }, [entityFilter, allowedCategoryIds]);
-
-  const pendingReporterIds = useMemo(
-    () => new Set(MOCK_PENDING_REPORTERS.filter((p) => p.status === 'PENDING').map((p) => p.ticketId)),
-    []
-  );
-
-  const filtered = useMemo(() => {
-    const base = entityFilter
-      ? MOCK_TICKETS // semua status saat drill-down entitas
-      : MOCK_TICKETS.filter((t) => ACTIVE_STATUSES.includes(t.status));
-    let result = base.filter((t) => {
-      if (entityFilter) {
-        switch (entityFilter.kind) {
-          case 'category':
-            if (!(t.categoryId === entityFilter.id || (t.subcategoryId != null && allowedCategoryIds?.has(t.subcategoryId)))) return false;
-            break;
-          case 'product':
-            if (t.productId !== entityFilter.id) return false;
-            break;
-          case 'reporter':
-            if (t.reporterEmployeeId !== entityFilter.id) return false;
-            break;
-          case 'customer':
-            if (t.reporterCustomerId !== entityFilter.id) return false;
-            break;
+  // Load tickets dari server (server-side filter + pagination)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const params: AdminTicketMonitoringParams = {
+          per_page: ITEMS_PER_PAGE,
+          page: currentPage,
+        };
+        if (search) params.search = search;
+        if (filterValues.status) {
+          params.status = filterValues.status as AdminTicketMonitoringParams['status'];
         }
-      }
-      const q = search.toLowerCase().trim();
-      const matchesSearch =
-        !q ||
-        t.id.toLowerCase().includes(q) ||
-        t.subject.toLowerCase().includes(q) ||
-        (t.soNumber && t.soNumber.toLowerCase().includes(q)) ||
-        t.reporterName.toLowerCase().includes(q) ||
-        (t.handlerName ?? '').toLowerCase().includes(q);
-      const matchesStatus = !filterValues.status || t.status === filterValues.status;
-      const matchesPriority = !filterValues.priority || t.priority === filterValues.priority;
-      const matchesType = !filterValues.type || t.ticketType === filterValues.type;
-      const matchesCategory = !filterValues.category || t.category === filterValues.category;
-      const matchesHandler = !filterValues.handler || t.handlerName === filterValues.handler;
-      const created = new Date(t.createdAt);
-      const matchesDate =
-        !dateRange?.from ||
-        (created >= new Date(dateRange.from.toDateString()) &&
-          (!dateRange.to || created <= new Date(dateRange.to.toDateString() + ' 23:59')));
-      return matchesSearch && matchesStatus && matchesPriority && matchesType && matchesCategory && matchesHandler && matchesDate;
-    });
-    return [...result].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [search, filterValues, dateRange, entityFilter, allowedCategoryIds]);
+        if (filterValues.priority) params.priority = filterValues.priority as 'A' | 'B' | 'C';
+        if (filterValues.type) {
+          params.ticketType = filterValues.type as AdminTicketMonitoringParams['ticketType'];
+        }
+        if (filterValues.category) params.categoryId = String(filterValues.category);
+        if (filterValues.handler) params.handlerId = String(filterValues.handler);
+        if (dateRange?.from) {
+          params.dateFrom = dateRange.from.toISOString().slice(0, 10);
+          if (dateRange.to) params.dateTo = dateRange.to.toISOString().slice(0, 10);
+        }
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+        const res = await getAdminTicketMonitoring(params);
+        if (cancelled) return;
+        setTickets(res.data);
+        setLastPage(res.last_page ?? 1);
+        setTotal(res.total ?? 0);
+      } catch (error) {
+        if (!cancelled) {
+          toast.error(error instanceof Error ? error.message : 'Gagal memuat tiket berjalan.');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [search, filterValues, dateRange, currentPage]);
+
+  const totalPages = Math.max(1, lastPage);
   const safePage = Math.min(currentPage, totalPages);
-  const paginatedTickets = filtered.slice((safePage - 1) * ITEMS_PER_PAGE, safePage * ITEMS_PER_PAGE);
   const goToPage = (p: number) => setCurrentPage(Math.min(Math.max(1, p), totalPages));
 
   return (
@@ -161,20 +132,21 @@ export default function AdminTicketMonitoringPage() {
       <Card className="w-full gap-0 overflow-hidden p-0">
         <CardContent className="p-4">
           <TableToolbar
-            searchValue={search}
-            onSearchChange={(v) => { setSearch(v); setCurrentPage(1); }}
-            searchPlaceholder="Cari ID tiket, SO, reporter, handler..."
+            searchValue={searchInput}
+            onSearchChange={(v) => { setSearchInput(v); }}
+            searchPlaceholder="Cari ID tiket, SO, subjek..."
             filters={[
               { key: 'status', label: 'Status', options: [
                 { value: 'OPEN', label: 'Open' },
+                { value: 'PENDING_APPROVAL', label: 'Menunggu Persetujuan' },
                 { value: 'IN_PROGRESS', label: 'Diproses' },
                 { value: 'PENDING_REVIEW', label: 'Menunggu Review' },
                 { value: 'REWORK_REQUIRED', label: 'Perlu Revisi' },
               ]},
               { key: 'priority', label: 'Prioritas', options: [
-                { value: 'A', label: 'A (Critical)' },
-                { value: 'B', label: 'B (High)' },
-                { value: 'C', label: 'C (Normal)' },
+                { value: 'A', label: 'A (Tinggi)' },
+                { value: 'B', label: 'B (Normal)' },
+                { value: 'C', label: 'C (Rendah)' },
               ]},
               { key: 'type', label: 'Tipe Tiket', options: [
                 { value: 'REQUEST', label: 'Request' },
@@ -182,8 +154,8 @@ export default function AdminTicketMonitoringPage() {
                 { value: 'COMPLAINT', label: 'Complaint' },
                 { value: 'INQUIRY', label: 'Inquiry' },
               ]},
-              { key: 'category', label: 'Kategori', options: [...new Set(MOCK_TICKETS.map((t) => t.category))].map((c) => ({ value: c, label: c })) },
-              { key: 'handler', label: 'Handler', options: [...new Set(MOCK_TICKETS.map((t) => t.handlerName ?? '').filter(Boolean))].map((h) => ({ value: h, label: h })) },
+              { key: 'category', label: 'Kategori', options: categoryOptions },
+              { key: 'handler', label: 'Handler', options: handlerOptions },
             ]}
             filterValues={filterValues}
             onFilterChange={(key, value) => { setFilter((prev) => ({ ...prev, [key]: value })); setCurrentPage(1); }}
@@ -192,33 +164,9 @@ export default function AdminTicketMonitoringPage() {
           />
         </CardContent>
 
-        <div className="flex items-center justify-between gap-3 px-6 py-4 border-t">
-          <div>
-            <p className="text-sm font-medium">
-              {entityFilter ? `Tiket: ${entityLabel}` : 'Tiket Berjalan'}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {entityFilter
-                ? entityTicketCount
-                  ? `${entityTicketCount.total} tiket total (${entityTicketCount.active} aktif, ${entityTicketCount.resolved} selesai)`
-                  : 'Tidak ada tiket'
-                : `${filtered.length} tiket aktif diproses sistem`}
-            </p>
-          </div>
-          {entityFilter && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => window.history.pushState({}, '', '/admin/ticket/monitoring')}
-              className="gap-1.5"
-            >
-              <ArrowUpRight className="size-3.5 rotate-180" />
-              Kembali
-            </Button>
-          )}
-        </div>
 
-        {paginatedTickets.length === 0 ? (
+
+        {!loading && tickets.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 border-t py-12 text-center">
             <Inbox className="size-8 text-muted-foreground/60" />
             <p className="text-sm font-medium">Tidak ada tiket yang ditemukan</p>
@@ -228,7 +176,7 @@ export default function AdminTicketMonitoringPage() {
           <>
             {/* Mobile card */}
             <div className="md:hidden px-4 pb-4">
-              {paginatedTickets.map((ticket) => (
+              {tickets.map((ticket) => (
                 <div key={ticket.id} className="mb-3 rounded-lg border bg-card py-4 last:mb-0">
                   <div className="px-4 space-y-2">
                     <div className="flex items-start justify-between gap-3">
@@ -268,14 +216,11 @@ export default function AdminTicketMonitoringPage() {
                     <TableHead className="bg-muted/50 px-6 py-3">Prioritas</TableHead>
                     <TableHead className="bg-muted/50 px-6 py-3">Handler</TableHead>
                     <TableHead className="bg-muted/50 px-6 py-3">Status</TableHead>
-                    {pendingReporterIds.size > 0 && (
-                      <TableHead className="bg-muted/50 px-6 py-3">Reporter</TableHead>
-                    )}
                     <TableHead className="bg-muted/50 px-6 py-3 text-right">Detail</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paginatedTickets.map((ticket) => (
+                  {tickets.map((ticket) => (
                     <TableRow key={ticket.id}>
                       <TableCell className="px-6 py-3 font-mono text-xs whitespace-nowrap">{ticket.id}</TableCell>
                       <TableCell className="px-6 py-3">
@@ -296,21 +241,6 @@ export default function AdminTicketMonitoringPage() {
                       <TableCell className="px-6 py-3"><PriorityBadge priority={ticket.priority} /></TableCell>
                       <TableCell className="px-6 py-3 text-sm">{ticket.handlerName ?? '-'}</TableCell>
                       <TableCell className="px-6 py-3"><StatusBadge status={ticket.status} /></TableCell>
-                      {pendingReporterIds.size > 0 && (
-                        <TableCell className="px-6 py-3">
-                          {pendingReporterIds.has(ticket.id) ? (
-                            <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                              <CircleHelp className="size-3" />
-                              Pending ID
-                            </Badge>
-                          ) : (
-                            <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                              <UserCheck className="size-3" />
-                              Identified
-                            </Badge>
-                          )}
-                        </TableCell>
-                      )}
                       <TableCell className="px-6 py-3 text-right">
                         <Button variant="outline" size="sm" className="gap-1.5 text-xs" asChild>
                           <Link href={`/admin/ticket/monitoring/${ticket.id}`}>

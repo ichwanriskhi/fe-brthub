@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -45,9 +46,26 @@ function SectionHeader({ icon: Icon, title }: { icon: React.ElementType; title: 
 }
 
 export function ReportDetailModal({ ticket, open, onOpenChange }: ReportDetailModalProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Reset scroll to top every time modal opens.
+  // setTimeout defers until after the Dialog's focus management has run,
+  // which is what causes the auto-scroll-to-bottom in the first place.
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = 0;
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [open]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90dvh] flex-col overflow-hidden p-0 gap-0 sm:max-w-3xl md:max-h-[85vh]">
+      <DialogContent
+        className="flex max-h-[90dvh] flex-col overflow-hidden p-0 gap-0 sm:max-w-3xl md:max-h-[85vh]"
+      >
         {/* Header — fixed, not scrollable */}
         <DialogHeader className="px-4 sm:px-5 pt-4 pb-3 border-b shrink-0">
           <div className="flex items-start justify-between gap-3">
@@ -69,7 +87,7 @@ export function ReportDetailModal({ ticket, open, onOpenChange }: ReportDetailMo
         </DialogHeader>
 
         {/* Scrollable body */}
-        <div className="overflow-y-auto overscroll-contain flex-1 divide-y">
+        <div ref={scrollRef} className="overflow-y-auto overscroll-contain flex-1 divide-y">
           {/* Pelapor + Customer */}
           <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x">
             {/* Pelapor */}

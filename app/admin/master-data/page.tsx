@@ -2,11 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import {
-  MOCK_CATEGORIES,
-  MOCK_DEPARTMENTS,
-  MOCK_POSITIONS,
-  MOCK_PRODUCTS,
-} from '@/lib/mock/admin';
+  getMasterDataAll,
+  createMasterData,
+  updateMasterData,
+  deleteMasterData,
+  type RawCategory,
+  type RawDepartment,
+  type RawPosition,
+  type RawProduct,
+} from '@/lib/api/master';
 import type {
   MasterDataEntry,
   MasterDataType,
@@ -29,7 +33,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Plus, Pencil, Trash2, CornerDownRight, ExternalLink } from 'lucide-react';
-import { problemStatsByCategory, problemStatsByProduct, getCategoryName } from '@/lib/mock/analytics';
+import { toast } from 'sonner';
 
 const ITEMS_PER_PAGE = 10;
 
@@ -39,12 +43,54 @@ interface TabConfig {
   entries: MasterDataEntry[];
 }
 
-const masterConfigs: TabConfig[] = [
-  { tab: 'category', label: 'Kategori', entries: MOCK_CATEGORIES },
-  { tab: 'department', label: 'Departemen', entries: MOCK_DEPARTMENTS },
-  { tab: 'position', label: 'Posisi', entries: MOCK_POSITIONS },
-  { tab: 'productLine', label: 'Lini Produk', entries: MOCK_PRODUCTS },
-];
+// ─── Normalizer: backend raw → entry shape yang dipakai tabel ─────────────────
+
+function normalizeCategories(raw: RawCategory[]): CategoryEntry[] {
+  return raw.map((c, i) => ({
+    id: c.id,
+    name: c.name,
+    description: c.description ?? undefined,
+    isActive: c.isActive,
+    parentId: c.parentId ?? undefined,
+    code: c.code,
+    sortOrder: i + 1,
+  }));
+}
+
+function normalizeDepartments(raw: RawDepartment[]): DepartmentEntry[] {
+  return raw.map((d) => ({
+    id: d.id,
+    name: d.name,
+    description: d.description ?? undefined,
+    isActive: d.isActive,
+    unitCode: d.code,
+    sortOrder: d.sortOrder || 1,
+  }));
+}
+
+function normalizePositions(raw: RawPosition[], deptNameById: Map<string, string>): PositionEntry[] {
+  return raw.map((p) => ({
+    id: p.id,
+    name: p.name,
+    description: p.departmentId ? deptNameById.get(p.departmentId) : undefined,
+    isActive: p.isActive,
+    hierarchyLevel: p.hierarchyLevel,
+    sortOrder: p.hierarchyLevel,
+    departmentId: p.departmentId ?? undefined,
+    code: p.code,
+  }));
+}
+
+function normalizeProducts(raw: RawProduct[]): ProductLineEntry[] {
+  return raw.map((p, i) => ({
+    id: p.id,
+    name: p.name,
+    description: p.description ?? undefined,
+    isActive: p.isActive,
+    productCode: p.code,
+    sortOrder: i + 1,
+  }));
+}
 
 const TAB_ORDER: MasterDataType[] = ['category', 'department', 'position', 'productLine'];
 
@@ -63,12 +109,24 @@ function isProduct(e: MasterDataEntry): e is ProductLineEntry {
   return 'productCode' in e;
 }
 
-function parentCategoryName(e: MasterDataEntry): string | undefined {
-  if (isCategory(e) && e.parentId) {
-    return MOCK_CATEGORIES.find((c) => c.id === e.parentId)?.name;
-  }
-  return undefined;
+function isDepartment(e: MasterDataEntry): e is DepartmentEntry {
+  return 'unitCode' in e;
 }
+
+function isPosition(e: MasterDataEntry): e is PositionEntry {
+  return 'hierarchyLevel' in e && 'departmentId' in e;
+}
+
+function slugCode(name: string, max = 50): string {
+  const slug = name
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_|_$/g, '')
+    .slice(0, max);
+  return slug || 'ITEM';
+}
+
 
 function StatusBadgeCell({ entry }: { entry: MasterDataEntry }) {
   return entry.isActive ? (
@@ -78,50 +136,53 @@ function StatusBadgeCell({ entry }: { entry: MasterDataEntry }) {
   );
 }
 
-/** Chip "aktif / selesai / total" — klik untuk drill-down ke monitoring tiket. */
-function ProblemChips({ stats, href }: { stats: { active: number; resolved: number; total: number }; href: string }) {
-  if (stats.total === 0) {
-    return <span className="text-xs text-muted-foreground">Belum ada laporan</span>;
-  }
-  return (
-    <a
-      href={href}
-      className="inline-flex flex-wrap items-center gap-1.5 text-xs"
-      title="Lihat tiket pada Monitoring Tiket"
-    >
-      {stats.active > 0 && (
-        <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400">
-          {stats.active} aktif
-        </Badge>
-      )}
-      {stats.resolved > 0 && (
-        <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-          {stats.resolved} selesai
-        </Badge>
-      )}
-      <span className="font-medium text-foreground">total {stats.total}</span>
-      <ExternalLink className="size-3 text-muted-foreground" />
-    </a>
-  );
-}
-
 export default function AdminMasterDataPage() {
   const [activeTab, setActiveTab] = useState<MasterDataType>('category');
   const [search, setSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [filterValues, setFilterValues] = useState<Record<string, string | null>>({});
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<MasterDataEntry | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<MasterDataEntry | null>(null);
 
+  // Master data asli dari backend
+  const [categories, setCategories] = useState<CategoryEntry[]>([]);
+  const [departments, setDepartments] = useState<DepartmentEntry[]>([]);
+  const [positions, setPositions] = useState<PositionEntry[]>([]);
+  const [products, setProducts] = useState<ProductLineEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
   // Form state (mock — belum tersimpan)
-  const [formName, setFormName] = useState('');
-  const [formDescription, setFormDescription] = useState('');
-  const [categoryType, setCategoryType] = useState<'main' | 'sub'>('main');
-  const [parentCategoryId, setParentCategoryId] = useState('');
-  const [unitCode, setUnitCode] = useState('');
-  const [hierarchyLevel, setHierarchyLevel] = useState('');
-  const [productCode, setProductCode] = useState('');
+    const [formName, setFormName] = useState('');
+    const [formDescription, setFormDescription] = useState('');
+    const [categoryType, setCategoryType] = useState<'main' | 'sub'>('main');
+    const [parentCategoryId, setParentCategoryId] = useState('');
+    const [unitCode, setUnitCode] = useState('');
+    const [hierarchyLevel, setHierarchyLevel] = useState('');
+    const [productCode, setProductCode] = useState('');
+    const [departmentId, setDepartmentId] = useState('');
+
+  const loadMasterData = async () => {
+    setLoading(true);
+    try {
+      const data = await getMasterDataAll();
+      const depts = normalizeDepartments(data.departments);
+      const deptNameById = new Map(depts.map((d) => [d.id, d.name]));
+      setCategories(normalizeCategories(data.categories));
+      setDepartments(depts);
+      setPositions(normalizePositions(data.positions, deptNameById));
+      setProducts(normalizeProducts(data.products));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Gagal memuat master data.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadMasterData();
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -131,16 +192,110 @@ export default function AdminMasterDataPage() {
     }
   }, []);
 
-  const config = masterConfigs.find((c) => c.tab === activeTab) ?? masterConfigs[0];
-  const title = DEFAULT_NAME[activeTab];
-  const topLevelCategories = MOCK_CATEGORIES.filter((c) => !c.parentId);
+  const configs: TabConfig[] = [
+    { tab: 'category', label: 'Kategori', entries: categories },
+    { tab: 'department', label: 'Departemen', entries: departments },
+    { tab: 'position', label: 'Posisi', entries: positions },
+    { tab: 'productLine', label: 'Lini Produk', entries: products },
+  ];
 
-  const filteredEntries = config.entries.filter((e) =>
-    !search.trim() ||
-    e.name.toLowerCase().includes(search.toLowerCase()) ||
-    (e.description ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (isProduct(e) && e.productCode.toLowerCase().includes(search.toLowerCase()))
-  );
+  const config = configs.find((c) => c.tab === activeTab) ?? configs[0];
+  const title = DEFAULT_NAME[activeTab];
+  const topLevelCategories = categories.filter((c) => !c.parentId);
+  const parentCategoryOptions = topLevelCategories.filter((c) => !editing || c.id !== editing.id);
+
+  const parentCategoryName = (entry: MasterDataEntry): string | undefined => {
+      if (isCategory(entry) && entry.parentId) {
+        return categories.find((c) => c.id === entry.parentId)?.name;
+      }
+      return undefined;
+    };
+
+    // Filter configs per tab
+    const getFiltersForTab = (tab: MasterDataType) => {
+      switch (tab) {
+        case 'category':
+          return [
+            {
+              key: 'isActive',
+              label: 'Status',
+              options: [
+                { value: 'true', label: 'Aktif' },
+                { value: 'false', label: 'Nonaktif' },
+              ],
+            },
+            {
+              key: 'parentCategory',
+              label: 'Kategori Induk',
+              options: topLevelCategories.map((c) => ({ value: c.id, label: c.name })),
+            },
+          ];
+        case 'department':
+          return [
+            {
+              key: 'isActive',
+              label: 'Status',
+              options: [
+                { value: 'true', label: 'Aktif' },
+                { value: 'false', label: 'Nonaktif' },
+              ],
+            },
+          ];
+        case 'position':
+          return [
+            {
+              key: 'isActive',
+              label: 'Status',
+              options: [
+                { value: 'true', label: 'Aktif' },
+                { value: 'false', label: 'Nonaktif' },
+              ],
+            },
+            {
+              key: 'department',
+              label: 'Departemen',
+              options: departments.map((d) => ({ value: d.id, label: d.name })),
+            },
+          ];
+        case 'productLine':
+          return [
+            {
+              key: 'isActive',
+              label: 'Status',
+              options: [
+                { value: 'true', label: 'Aktif' },
+                { value: 'false', label: 'Nonaktif' },
+              ],
+            },
+          ];
+        default:
+          return [];
+      }
+    };
+
+    const filteredEntries = config.entries.filter((e) => {
+      if (search.trim() && 
+        !e.name.toLowerCase().includes(search.toLowerCase()) && 
+        !(e.description ?? '').toLowerCase().includes(search.toLowerCase()) &&
+        !(isProduct(e) && e.productCode.toLowerCase().includes(search.toLowerCase()))
+      ) {
+        return false;
+      }
+      // Apply filters
+      const isActiveFilter = filterValues.isActive;
+      if (isActiveFilter !== null && isActiveFilter !== undefined) {
+        if (e.isActive !== (isActiveFilter === 'true')) return false;
+      }
+      if (activeTab === 'category') {
+        const parentFilter = filterValues.parentCategory;
+        if (parentFilter && isCategory(e) && e.parentId !== parentFilter) return false;
+      }
+      if (activeTab === 'position') {
+              const deptFilter = filterValues.department;
+              if (deptFilter && 'departmentId' in e && e.departmentId !== deptFilter) return false;
+            }
+      return true;
+    });
 
   const totalPages = Math.max(1, Math.ceil(filteredEntries.length / ITEMS_PER_PAGE));
   const safePage = Math.min(currentPage, totalPages);
@@ -165,33 +320,168 @@ export default function AdminMasterDataPage() {
   const goToPage = (p: number) => setCurrentPage(Math.min(Math.max(1, p), totalPages));
 
   const openAdd = () => {
-    setEditing(null);
-    setFormName('');
-    setFormDescription('');
-    setCategoryType('main');
-    setParentCategoryId('');
-    setUnitCode('');
-    setHierarchyLevel('');
-    setProductCode('');
-    setDialogOpen(true);
-  };
+      setEditing(null);
+      setFormName('');
+      setFormDescription('');
+      setCategoryType('main');
+      setParentCategoryId('');
+      setUnitCode('');
+      setHierarchyLevel('');
+      setProductCode('');
+      setDepartmentId('');
+      setDialogOpen(true);
+    };
 
   const openEdit = (entry: MasterDataEntry) => {
     setEditing(entry);
     setFormName(entry.name);
     setFormDescription(entry.description ?? '');
+    setCategoryType('main');
+    setParentCategoryId('');
+    setUnitCode('');
+    setHierarchyLevel('');
+    setProductCode('');
+    setDepartmentId('');
+
     if (isCategory(entry)) {
       setCategoryType(entry.parentId ? 'sub' : 'main');
       setParentCategoryId(entry.parentId ?? '');
     }
     if (isProduct(entry)) setProductCode(entry.productCode);
+    if (isDepartment(entry)) setUnitCode(entry.unitCode);
+    if (isPosition(entry)) {
+      setDepartmentId(entry.departmentId ?? '');
+      setHierarchyLevel(String(entry.hierarchyLevel));
+    }
     setDialogOpen(true);
   };
 
   const openDelete = (entry: MasterDataEntry) => {
-    setDeleteTarget(entry);
-    setConfirmOpen(true);
-  };
+      setDeleteTarget(entry);
+      setConfirmOpen(true);
+    };
+
+    // ─── Save handler (create or update) ─────────────────────────────────────
+    const handleSave = async () => {
+      if (!formName.trim()) {
+        toast.error('Nama wajib diisi.');
+        return;
+      }
+
+      const typeMap: Record<MasterDataType, 'category' | 'department' | 'position' | 'product'> = {
+        category: 'category',
+        department: 'department',
+        position: 'position',
+        productLine: 'product',
+      };
+      const apiType = typeMap[activeTab];
+
+      const payload: {
+        name: string;
+        code: string;
+        isActive: boolean;
+        description?: string | null;
+        parentCategoryId?: string | null;
+        sortOrder?: number;
+        departmentId?: string;
+        hierarchyLevel?: number;
+      } = {
+        name: formName.trim(),
+        code: '',
+        isActive: editing ? editing.isActive : true,
+      };
+
+      if (activeTab === 'category') {
+        const existing = editing && isCategory(editing) ? editing.code : '';
+        payload.code = existing || slugCode(formName.trim(), 100);
+        payload.description = formDescription.trim() || null;
+        payload.parentCategoryId = categoryType === 'sub' ? parentCategoryId : null;
+      } else if (activeTab === 'department') {
+        payload.code = unitCode.trim().toUpperCase();
+        payload.description = formDescription.trim() || null;
+        payload.sortOrder = editing && isDepartment(editing) ? editing.sortOrder : 1;
+      } else if (activeTab === 'position') {
+        const existing = editing && isPosition(editing) ? editing.code : '';
+        payload.code = existing || slugCode(formName.trim(), 50);
+        payload.departmentId = departmentId;
+        payload.hierarchyLevel = parseInt(hierarchyLevel, 10) || 0;
+      } else if (activeTab === 'productLine') {
+        payload.code = productCode.trim().toUpperCase();
+        payload.description = formDescription.trim() || null;
+      }
+
+      // For position, we need department - skip if not selected
+            if (activeTab === 'position' && !departmentId) {
+              toast.error('Pilih departemen untuk posisi.');
+              return;
+            }
+            if (activeTab === 'productLine' && !productCode.trim()) {
+        toast.error('Kode produk wajib diisi.');
+        return;
+      }
+      if (activeTab === 'department' && !unitCode.trim()) {
+        toast.error('Kode unit wajib diisi.');
+        return;
+      }
+      if (activeTab === 'category' && categoryType === 'sub' && !parentCategoryId) {
+        toast.error('Pilih kategori induk untuk sub kategori.');
+        return;
+      }
+
+      try {
+        setLoading(true);
+        if (editing) {
+          await updateMasterData(apiType, editing.id, payload);
+          toast.success(`${title} berhasil diubah.`);
+        } else {
+          await createMasterData(apiType, payload);
+          toast.success(`${title} berhasil ditambahkan.`);
+        }
+        setDialogOpen(false);
+        await loadMasterData();
+      } catch (error: unknown) {
+        const err = error as { status?: number; errors?: Record<string, string[]>; message?: string };
+        if (err.status === 422 && err.errors) {
+          const firstError = Object.values(err.errors).flat()[0];
+          toast.error(firstError || 'Validasi gagal.');
+        } else {
+          toast.error(err.message || 'Operasi gagal.');
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    // ─── Delete handler ──────────────────────────────────────────────────────
+    const handleDelete = async () => {
+      if (!deleteTarget) return;
+
+      const typeMap: Record<MasterDataType, 'category' | 'department' | 'position' | 'product'> = {
+        category: 'category',
+        department: 'department',
+        position: 'position',
+        productLine: 'product',
+      };
+      const apiType = typeMap[activeTab];
+
+      try {
+        setLoading(true);
+        await deleteMasterData(apiType, deleteTarget.id);
+        toast.success(`${title} berhasil dihapus.`);
+        setConfirmOpen(false);
+        setDeleteTarget(null);
+        await loadMasterData();
+      } catch (error: unknown) {
+        const err = error as { status?: number; message?: string };
+        if (err.status === 409) {
+          toast.error(err.message || 'Data tidak dapat dihapus karena sedang digunakan.');
+        } else {
+          toast.error(err.message || 'Gagal menghapus data.');
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
 
   const renderDetailCell = (entry: MasterDataEntry) => {
     switch (activeTab) {
@@ -223,7 +513,7 @@ export default function AdminMasterDataPage() {
       >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <TabsList className="flex w-full justify-start overflow-x-auto overflow-y-hidden rounded-lg no-scrollbar sm:w-auto sm:inline-flex">
-            {masterConfigs.map((c) => (
+            {configs.map((c) => (
               <TabsTrigger key={c.tab} value={c.tab} className="min-w-fit px-4 whitespace-nowrap">
                 {c.label}
               </TabsTrigger>
@@ -235,16 +525,19 @@ export default function AdminMasterDataPage() {
           </Button>
         </div>
 
-        {masterConfigs.map((c) => (
-          <TabsContent key={c.tab} value={c.tab}>
-            <Card className="w-full gap-0 overflow-hidden p-0">
-              <CardContent className="p-4">
-                <TableToolbar
-                  searchValue={search}
-                  onSearchChange={(v) => { setSearch(v); setCurrentPage(1); }}
-                  searchPlaceholder={`Cari ${title.toLowerCase()}...`}
-                />
-              </CardContent>
+        {configs.map((c) => (
+                  <TabsContent key={c.tab} value={c.tab}>
+                    <Card className="w-full gap-0 overflow-hidden p-0">
+                      <CardContent className="p-4">
+                        <TableToolbar
+                          searchValue={search}
+                          onSearchChange={(v) => { setSearch(v); setCurrentPage(1); }}
+                          searchPlaceholder={`Cari ${title.toLowerCase()}...`}
+                          filters={getFiltersForTab(activeTab)}
+                          filterValues={filterValues}
+                          onFilterChange={(key, value) => setFilterValues(prev => ({ ...prev, [key]: value }))}
+                        />
+                      </CardContent>
 
               {/* Mobile card view */}
               <div className="md:hidden px-4 pb-4">
@@ -266,15 +559,21 @@ export default function AdminMasterDataPage() {
                         {(activeTab === 'category' || activeTab === 'productLine') && (
                           <div className="pt-1">
                             {activeTab === 'category' ? (
-                              <ProblemChips
-                                stats={problemStatsByCategory(entry.id)}
+                              <a
                                 href={`/admin/ticket/monitoring?category=${entry.id}`}
-                              />
+                                className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
+                              >
+                                Lihat tiket
+                                <ExternalLink className="size-3" />
+                              </a>
                             ) : (
-                              <ProblemChips
-                                stats={problemStatsByProduct(entry.id)}
+                              <a
                                 href={`/admin/ticket/monitoring?product=${entry.id}`}
-                              />
+                                className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
+                              >
+                                Lihat tiket
+                                <ExternalLink className="size-3" />
+                              </a>
                             )}
                           </div>
                         )}
@@ -294,11 +593,15 @@ export default function AdminMasterDataPage() {
                     </div>
                   </div>
                 ))}
-                {entries.length === 0 && (
+                {loading ? (
+                  <p className="py-10 text-center text-sm text-muted-foreground">
+                    Memuat data...
+                  </p>
+                ) : entries.length === 0 ? (
                   <p className="py-10 text-center text-sm text-muted-foreground">
                     Tidak ada {title.toLowerCase()} yang ditemukan.
                   </p>
-                )}
+                ) : null}
               </div>
 
               {/* Desktop table */}
@@ -340,15 +643,21 @@ export default function AdminMasterDataPage() {
                           {(activeTab === 'category' || activeTab === 'productLine') && (
                             <TableCell className="px-6 py-3">
                               {activeTab === 'category' ? (
-                                <ProblemChips
-                                  stats={problemStatsByCategory(entry.id)}
+                                <a
                                   href={`/admin/ticket/monitoring?category=${entry.id}`}
-                                />
+                                  className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
+                                >
+                                  Lihat tiket
+                                  <ExternalLink className="size-3" />
+                                </a>
                               ) : (
-                                <ProblemChips
-                                  stats={problemStatsByProduct(entry.id)}
+                                <a
                                   href={`/admin/ticket/monitoring?product=${entry.id}`}
-                                />
+                                  className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
+                                >
+                                  Lihat tiket
+                                  <ExternalLink className="size-3" />
+                                </a>
                               )}
                             </TableCell>
                           )}
@@ -424,7 +733,11 @@ export default function AdminMasterDataPage() {
                   <RadioGroup
                     className="grid grid-cols-2 gap-2"
                     value={categoryType}
-                    onValueChange={(v) => setCategoryType(v as 'main' | 'sub')}
+                    onValueChange={(v) => {
+                      const next = v as 'main' | 'sub';
+                      setCategoryType(next);
+                      if (next === 'main') setParentCategoryId('');
+                    }}
                   >
                     <label className="flex cursor-pointer items-center gap-2 rounded-lg border p-2.5 text-sm has-data-checked:border-primary has-data-checked:bg-primary/5">
                       <RadioGroupItem value="main" />
@@ -440,16 +753,16 @@ export default function AdminMasterDataPage() {
                   <Field>
                     <FieldLabel>Parent Kategori *</FieldLabel>
                     <Select
-                      value={parentCategoryId || undefined}
+                      value={parentCategoryId}
                       onValueChange={(v) => setParentCategoryId(v ?? '')}
-                      items={topLevelCategories.map((c) => ({ value: c.id, label: c.name }))}
+                      items={parentCategoryOptions.map((c) => ({ value: c.id, label: c.name }))}
                     >
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="Pilih kategori induk" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
-                          {topLevelCategories.map((c) => (
+                          {parentCategoryOptions.map((c) => (
                             <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                           ))}
                         </SelectGroup>
@@ -496,16 +809,37 @@ export default function AdminMasterDataPage() {
             )}
 
             {activeTab === 'position' && (
-              <Field>
-                <FieldLabel>Level Hierarki *</FieldLabel>
-                <Input
-                  value={hierarchyLevel}
-                  onChange={(e) => setHierarchyLevel(e.target.value)}
-                  placeholder="e.g. 30"
-                  className="w-full font-mono"
-                />
-              </Field>
-            )}
+                          <>
+                            <Field>
+                              <FieldLabel>Departemen *</FieldLabel>
+                              <Select
+                                value={departmentId}
+                                onValueChange={(v) => setDepartmentId(v ?? '')}
+                                items={departments.map((d) => ({ value: d.id, label: d.name }))}
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue placeholder="Pilih departemen" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectGroup>
+                                    {departments.map((d) => (
+                                      <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                                    ))}
+                                  </SelectGroup>
+                                </SelectContent>
+                              </Select>
+                            </Field>
+                            <Field>
+                              <FieldLabel>Level Hierarki *</FieldLabel>
+                              <Input
+                                value={hierarchyLevel}
+                                onChange={(e) => setHierarchyLevel(e.target.value)}
+                                placeholder="e.g. 30"
+                                className="w-full font-mono"
+                              />
+                            </Field>
+                          </>
+                        )}
 
             {activeTab !== 'position' && (
               <Field>
@@ -521,9 +855,11 @@ export default function AdminMasterDataPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Batal</Button>
-            <Button onClick={() => setDialogOpen(false)}>Simpan</Button>
-          </DialogFooter>
+                      <Button variant="outline" onClick={() => setDialogOpen(false)}>Batal</Button>
+                      <Button onClick={handleSave} disabled={loading}>
+                        {loading ? 'Menyimpan...' : 'Simpan'}
+                      </Button>
+                    </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -537,17 +873,15 @@ export default function AdminMasterDataPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmOpen(false)}>Batal</Button>
-            <Button
-              className="bg-destructive hover:bg-destructive/90"
-              onClick={() => {
-                setDeleteTarget(null);
-                setConfirmOpen(false);
-              }}
-            >
-              Ya, Hapus
-            </Button>
-          </DialogFooter>
+                      <Button variant="outline" onClick={() => setConfirmOpen(false)}>Batal</Button>
+                      <Button
+                        className="bg-destructive hover:bg-destructive/90"
+                        onClick={handleDelete}
+                        disabled={loading}
+                      >
+                        {loading ? 'Menghapus...' : 'Ya, Hapus'}
+                      </Button>
+                    </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

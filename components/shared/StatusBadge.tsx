@@ -6,6 +6,7 @@ import { CircleCheck, CircleDashed, LoaderCircle, CircleAlert, CircleX, CircleDo
 
 const STATUS_MAP: Record<TicketStatus, { label: string; icon: typeof CircleDot; iconClass: string }> = {
   OPEN: { label: 'Open', icon: CircleDot, iconClass: 'text-sky-600 dark:text-sky-400' },
+  PENDING_APPROVAL: { label: 'Menunggu Approval', icon: LoaderCircle, iconClass: 'text-indigo-600 dark:text-indigo-400' },
   IN_PROGRESS: { label: 'Diproses', icon: LoaderCircle, iconClass: 'text-amber-600 dark:text-amber-400' },
   PENDING_REVIEW: { label: 'Menunggu Review', icon: CircleDashed, iconClass: 'text-violet-600 dark:text-violet-400' },
   REWORK_REQUIRED: { label: 'Perlu Revisi', icon: CircleAlert, iconClass: 'text-orange-600 dark:text-orange-400' },
@@ -15,6 +16,7 @@ const STATUS_MAP: Record<TicketStatus, { label: string; icon: typeof CircleDot; 
 
 export function StatusBadge({ status }: { status: TicketStatus }) {
   const v = STATUS_MAP[status];
+  if (!v) return <Badge variant="outline">Unknown</Badge>;
   const Icon = v.icon;
   return (
     <Badge variant="outline">
@@ -33,6 +35,7 @@ const PRIORITY_STYLE: Record<TicketPriority, { label: string; cls: string }> = {
 export function PriorityBadge({ priority }: { priority: TicketPriority | null }) {
   if (!priority) return null;
   const v = PRIORITY_STYLE[priority];
+  if (!v) return <Badge variant="outline">{priority}</Badge>;
   return <Badge variant="outline" className={v.cls}>{v.label}</Badge>;
 }
 
@@ -45,6 +48,7 @@ const TYPE_MAP: Record<TicketType, { label: string; icon: typeof CircleDot; icon
 
 export function TypeBadge({ ticketType }: { ticketType: TicketType }) {
   const v = TYPE_MAP[ticketType];
+  if (!v) return <Badge variant="outline">Unknown</Badge>;
   const Icon = v.icon;
   return (
     <Badge variant="outline">

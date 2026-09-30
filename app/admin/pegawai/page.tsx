@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import { MOCK_EMPLOYEES, MOCK_DEPARTMENTS, MOCK_POSITIONS } from '@/lib/mock/admin';
+import { useState, useEffect } from 'react';
+import { getAdminEmployees, createAdminEmployee, updateAdminEmployee, appRolesToDbNames, type EmployeeProfile } from '@/lib/api/admin-employees';
+import { getMasterDataAll } from '@/lib/api/master';
 import type { EmployeeEntry, AccountStatus, AppRole } from '@/lib/types/admin';
-import { APP_ROLES } from '@/lib/types/admin';
-import { reportStatsByEmployee } from '@/lib/mock/analytics';
+import { APP_ROLES, ASSIGNABLE_APP_ROLES } from '@/lib/types/admin';
 import { TableToolbar, type TableFilterValues } from '@/components/shared/TableToolbar';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,7 +15,8 @@ import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, Pagi
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Field, FieldLabel } from '@/components/ui/field';
-import { Plus, Pencil, Trash2, MailCheck, KeyRound, ExternalLink } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Plus, Pencil, MailCheck, KeyRound, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 
 const ITEMS_PER_PAGE = 10;
@@ -35,28 +36,40 @@ const ROLE_LABEL: Record<AppRole, { label: string; className: string }> = {
   STAFF:    { label: 'Staff',    className: 'bg-muted/50 text-muted-foreground' },
 };
 
-/** Chip jumlah laporan yang dibuat pegawai ini (sebagai reporter). */
-function ReportChips({ employeeId }: { employeeId: string }) {
-  const stats = reportStatsByEmployee(employeeId);
-  if (stats.total === 0) {
-    return <span className="text-xs text-muted-foreground">Belum pernah melapor</span>;
-  }
+function RoleBadges({ roles }: { roles: AppRole[] }) {
+  const list = roles.length > 0 ? roles : (['STAFF'] as AppRole[]);
   return (
-    <a
-      href={`/admin/ticket/monitoring?reporter=${employeeId}`}
-      className="inline-flex flex-wrap items-center gap-1.5 text-xs"
-      title="Lihat tiket yang dilaporkan pegawai ini"
-    >
-      {stats.active > 0 && (
-        <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400">{stats.active} aktif</Badge>
-      )}
-      {stats.resolved > 0 && (
-        <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">{stats.resolved} selesai</Badge>
-      )}
-      <span className="font-medium text-foreground">total {stats.total}</span>
-      <ExternalLink className="size-3 text-muted-foreground" />
-    </a>
+    <div className="flex flex-wrap gap-1">
+      {list.map((role) => (
+        <Badge key={role} className={ROLE_LABEL[role]?.className ?? ROLE_LABEL.STAFF.className}>
+          {ROLE_LABEL[role]?.label ?? role}
+        </Badge>
+      ))}
+    </div>
   );
+}
+
+/** Map employee profile dari API → EmployeeEntry untuk tabel/UI */
+function toEntry(e: EmployeeProfile): EmployeeEntry {
+  const roles = e.roles?.length ? e.roles : ['STAFF'];
+  return {
+    id: e.id,
+    userId: e.user_id,
+    employeeNumber: e.employee_number,
+    name: e.user?.full_name ?? '-',
+    phone: e.user?.phone_number ?? '-',
+    email: e.user?.email ?? undefined,
+    departmentId: e.department_id ?? '',
+    positionId: e.position_id ?? '',
+    departmentName: e.department?.name ?? '-',
+    positionName: e.position?.name ?? '-',
+    hierarchyLevel: e.position?.hierarchy_level ?? 0,
+    role: (roles[0] ?? 'STAFF') as AppRole,
+    roles: roles as AppRole[],
+    accountStatus: e.user?.is_active ? 'ACTIVE' : 'NOT_ACTIVATED',
+    activationLinkSent: false,
+    hiredAt: e.created_at,
+  };
 }
 
 export default function AdminPegawaiPage() {
@@ -64,13 +77,21 @@ export default function AdminPegawaiPage() {
   const [departmentFilter, setDepartmentFilter] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [roleFilter, setRoleFilter] = useState<string>('');
+  const [employees, setEmployees] = useState<EmployeeEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [departments, setDepartments] = useState<{ id: string; name: string; isActive: boolean }[]>([]);
+  const [positions, setPositions] = useState<{ id: string; name: string; hierarchyLevel: number; isActive: boolean; departmentId?: string }[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<EmployeeEntry | null>(null);
+  const [saving, setSaving] = useState(false);
   const [name, setName] = useState('');
+  const [employeeNumber, setEmployeeNumber] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [departmentId, setDepartmentId] = useState<string>('');
   const [positionId, setPositionId] = useState<string>('');
-  const [role, setRole] = useState<AppRole>('STAFF');
+  const [selectedRoles, setSelectedRoles] = useState<AppRole[]>([]);
 
   const filterValues: TableFilterValues = {
     departmentId: departmentFilter,
@@ -78,7 +99,7 @@ export default function AdminPegawaiPage() {
     role: roleFilter,
   };
 
-  const filtered = MOCK_EMPLOYEES.filter((e) => {
+  const filtered = employees.filter((e) => {
     const q = search.toLowerCase().trim();
     const matchesSearch =
       !q ||
@@ -88,7 +109,11 @@ export default function AdminPegawaiPage() {
       (e.email ?? '').toLowerCase().includes(q);
     const matchesDept = !departmentFilter || e.departmentId === departmentFilter;
     const matchesStatus = !statusFilter || e.accountStatus === statusFilter;
-    const matchesRole = !roleFilter || e.role === roleFilter;
+    const matchesRole =
+      !roleFilter ||
+      (roleFilter === 'STAFF'
+        ? e.roles.length === 0 || e.roles.every((r) => r === 'STAFF')
+        : e.roles.includes(roleFilter as AppRole));
     return matchesSearch && matchesDept && matchesStatus && matchesRole;
   });
 
@@ -114,22 +139,100 @@ export default function AdminPegawaiPage() {
 
   const goToPage = (p: number) => setCurrentPage(Math.min(Math.max(1, p), totalPages));
 
+  const loadEmployees = async () => {
+    setLoading(true);
+    try {
+      const [res, master] = await Promise.all([
+        getAdminEmployees({ per_page: 100 }),
+        getMasterDataAll(),
+      ]);
+      setEmployees(res.data.map(toEntry));
+      setDepartments(master.departments.map((d) => ({ id: d.id, name: d.name, isActive: d.isActive })));
+      setPositions(master.positions.map((p) => ({
+        id: p.id,
+        name: p.name,
+        hierarchyLevel: p.hierarchyLevel,
+        isActive: p.isActive,
+        departmentId: p.departmentId ?? undefined,
+      })));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Gagal memuat data pegawai.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadEmployees();
+  }, []);
+
   const openAdd = () => {
     setEditing(null);
     setName('');
+    setEmployeeNumber('');
+    setEmail('');
+    setPhone('');
     setDepartmentId('');
     setPositionId('');
-    setRole('STAFF');
+    setSelectedRoles([]);
     setDialogOpen(true);
   };
 
   const openEdit = (emp: EmployeeEntry) => {
     setEditing(emp);
     setName(emp.name);
+    setEmployeeNumber(emp.employeeNumber);
+    setEmail(emp.email ?? '');
+    setPhone(emp.phone === '-' ? '' : emp.phone);
     setDepartmentId(emp.departmentId);
     setPositionId(emp.positionId);
-    setRole(emp.role);
+    setSelectedRoles(emp.roles.filter((r) => r !== 'STAFF' && r !== 'MANAGER'));
     setDialogOpen(true);
+  };
+
+  const toggleRole = (role: AppRole) => {
+    setSelectedRoles((prev) =>
+      prev.includes(role) ? prev.filter((item) => item !== role) : [...prev, role],
+    );
+  };
+
+  const handleSave = async () => {
+    if (!name.trim()) {
+      toast.error('Nama wajib diisi.');
+      return;
+    }
+    if (!employeeNumber.trim()) {
+      toast.error('Nomor pegawai wajib diisi.');
+      return;
+    }
+
+    const payload = {
+      full_name: name.trim(),
+      employee_number: employeeNumber.trim(),
+      email: email.trim() || null,
+      phone_number: phone.trim() || null,
+      department_id: departmentId || null,
+      position_id: positionId || null,
+      status: 'active' as const,
+      roles: appRolesToDbNames(selectedRoles),
+    };
+
+    try {
+      setSaving(true);
+      if (editing) {
+        await updateAdminEmployee(editing.id, payload);
+        toast.success('Data pegawai berhasil diubah.');
+      } else {
+        await createAdminEmployee(payload);
+        toast.success('Pegawai baru berhasil ditambahkan.');
+      }
+      setDialogOpen(false);
+      await loadEmployees();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Gagal menyimpan data pegawai.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const sendSetupLink = (emp: EmployeeEntry) => {
@@ -193,7 +296,7 @@ export default function AdminPegawaiPage() {
               {
                 key: 'departmentId',
                 label: 'Departemen',
-                options: MOCK_DEPARTMENTS.map((d) => ({ value: d.id, label: d.name })),
+                options: departments.map((d) => ({ value: d.id, label: d.name })),
               },
               {
                 key: 'role',
@@ -219,13 +322,7 @@ export default function AdminPegawaiPage() {
           />
         </CardContent>
 
-        <div className="flex items-center justify-between gap-3 px-6 py-4 border-t">
-          <div>
-            <p className="text-sm font-medium">Pegawai & Akun</p>
-            <p className="text-xs text-muted-foreground">
-              {filtered.length} pegawai • aktif: {MOCK_EMPLOYEES.filter((e) => e.accountStatus === 'ACTIVE').length}
-            </p>
-          </div>
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t">
           <Button size="sm" onClick={openAdd}>
             <Plus className="size-4" />
             Pegawai Baru
@@ -245,13 +342,17 @@ export default function AdminPegawaiPage() {
                     </p>
                     <p className="font-mono text-xs text-muted-foreground">{e.phone}</p>
                     <div className="pt-1">
-                      <ReportChips employeeId={e.id} />
+                      <a
+                      href={`/admin/ticket/monitoring?reporter=${e.id}`}
+                      className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
+                    >
+                      Lihat tiket
+                      <ExternalLink className="size-3" />
+                    </a>
                     </div>
                   </div>
-                  <div className="flex shrink-0 flex-col items-end gap-1.5">
-                    <Badge className={ROLE_LABEL[e.role].className}>
-                      {ROLE_LABEL[e.role].label}
-                    </Badge>
+                    <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    <RoleBadges roles={e.roles} />
                     <Badge className={ACCOUNT_STATUS_LABEL[e.accountStatus].className}>
                       {ACCOUNT_STATUS_LABEL[e.accountStatus].label}
                     </Badge>
@@ -301,9 +402,7 @@ export default function AdminPegawaiPage() {
                   <TableCell className="px-6 py-3 text-sm">{e.departmentName}</TableCell>
                   <TableCell className="px-6 py-3 text-sm">{e.positionName}</TableCell>
                   <TableCell className="px-6 py-3">
-                    <Badge className={ROLE_LABEL[e.role].className}>
-                      {ROLE_LABEL[e.role].label}
-                    </Badge>
+                    <RoleBadges roles={e.roles} />
                   </TableCell>
                   <TableCell className="px-6 py-3 font-mono text-xs text-muted-foreground">{e.phone}</TableCell>
                   <TableCell className="px-6 py-3">
@@ -312,7 +411,13 @@ export default function AdminPegawaiPage() {
                     </Badge>
                   </TableCell>
                   <TableCell className="px-6 py-3">
-                    <ReportChips employeeId={e.id} />
+                    <a
+                      href={`/admin/ticket/monitoring?reporter=${e.id}`}
+                      className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
+                    >
+                      Lihat tiket
+                      <ExternalLink className="size-3" />
+                    </a>
                   </TableCell>
                   <TableCell className="px-6 py-3 text-right">
                     <div className="flex items-center gap-1">
@@ -359,32 +464,63 @@ export default function AdminPegawaiPage() {
 
       {/* Add / Edit pegawai dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{editing ? `Ubah ${editing.name}` : 'Pegawai Baru'}</DialogTitle>
             <DialogDescription>
-              Data pegawai + hubungan ke akun. Admin tidak atur password pegawai.
+              Satu user bisa memiliki beberapa role sekaligus. Tanpa role aplikasi, pegawai hanya menjadi pelapor (staff).
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
             <Field>
+              <FieldLabel>Nomor Pegawai *</FieldLabel>
+              <Input
+                value={employeeNumber}
+                onChange={(e) => setEmployeeNumber(e.target.value)}
+                placeholder="EMP-0001"
+                className="w-full font-mono"
+              />
+            </Field>
+            <Field>
               <FieldLabel>Nama *</FieldLabel>
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama lengkap" className="w-full" />
+            </Field>
+            <Field>
+              <FieldLabel>Email</FieldLabel>
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="nama@brt.co.id"
+                className="w-full"
+              />
+            </Field>
+            <Field>
+              <FieldLabel>Telepon</FieldLabel>
+              <Input
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="08xxxxxxxxxx"
+                className="w-full font-mono"
+              />
             </Field>
             <Field>
               <FieldLabel>Departemen</FieldLabel>
               <Select
                 value={departmentId || undefined}
-                onValueChange={(v) => setDepartmentId(v ?? '')}
-                items={MOCK_DEPARTMENTS.filter((d) => d.isActive).map((d) => ({ value: d.id, label: d.name }))}
+                onValueChange={(v) => {
+                  setDepartmentId(v ?? '');
+                  setPositionId('');
+                }}
+                items={departments.filter((d) => d.isActive).map((d) => ({ value: d.id, label: d.name }))}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Pilih departemen" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    {MOCK_DEPARTMENTS.filter((d) => d.isActive).map((d) => (
+                    {departments.filter((d) => d.isActive).map((d) => (
                       <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
                     ))}
                   </SelectGroup>
@@ -396,47 +532,54 @@ export default function AdminPegawaiPage() {
               <Select
                 value={positionId || undefined}
                 onValueChange={(v) => setPositionId(v ?? '')}
-                items={MOCK_POSITIONS.filter((p) => p.isActive).map((p) => ({ value: p.id, label: `${p.name} (Level ${p.hierarchyLevel})` }))}
+                items={positions
+                  .filter((p) => p.isActive && (!departmentId || !p.departmentId || p.departmentId === departmentId))
+                  .map((p) => ({ value: p.id, label: `${p.name} (Level ${p.hierarchyLevel})` }))}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Pilih posisi" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    {MOCK_POSITIONS.filter((p) => p.isActive).map((p) => (
-                      <SelectItem key={p.id} value={p.id}>{p.name} (Level {p.hierarchyLevel})</SelectItem>
-                    ))}
+                    {positions
+                      .filter((p) => p.isActive && (!departmentId || !p.departmentId || p.departmentId === departmentId))
+                      .map((p) => (
+                        <SelectItem key={p.id} value={p.id}>{p.name} (Level {p.hierarchyLevel})</SelectItem>
+                      ))}
                   </SelectGroup>
                 </SelectContent>
               </Select>
             </Field>
             <Field>
-              <FieldLabel>Role Aplikasi *</FieldLabel>
-              <Select
-                value={role}
-                onValueChange={(v) => setRole((v ?? 'STAFF') as AppRole)}
-                items={APP_ROLES.map((r) => ({ value: r.value, label: r.label }))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Pilih role" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {APP_ROLES.map((r) => (
-                      <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+              <FieldLabel>Role Aplikasi</FieldLabel>
+              <div className="grid grid-cols-2 gap-2">
+                {ASSIGNABLE_APP_ROLES.map((item) => {
+                  const checked = selectedRoles.includes(item.value);
+                  return (
+                    <label
+                      key={item.value}
+                      className="flex cursor-pointer items-center gap-2 rounded-lg border p-2.5 text-sm has-data-checked:border-primary has-data-checked:bg-primary/5"
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={() => toggleRole(item.value)}
+                      />
+                      <span>{item.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
               <p className="text-xs text-muted-foreground">
-                Role menentukan menu &amp; akses setelah login. Admin tidak mengatur password pegawai.
+                Boleh pilih lebih dari satu. Kosongkan semua jika pegawai hanya pelapor (staff).
               </p>
             </Field>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Batal</Button>
-            <Button onClick={() => setDialogOpen(false)}>Simpan</Button>
+            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>Batal</Button>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? 'Menyimpan...' : 'Simpan'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -12,6 +12,7 @@ import { HANDLER_ACTIONS } from '@/lib/constants/reviewer';
 import type { Ticket } from '@/lib/types/ticket';
 import { StatusBadge, TypeBadge, PriorityBadge } from '@/components/shared/StatusBadge';
 import { TicketChatDrawer } from '@/components/shared/TicketChatDrawer';
+import { TicketTimeline } from '@/components/shared/TicketTimeline';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -43,6 +44,7 @@ import {
 import { toast } from 'sonner';
 import { ReportDetailModal } from '@/components/shared/ReportDetailModal';
 import { UserDetailModal, type UserDetailData } from '@/components/shared/UserDetailModal';
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 
 const PROGRESS_SHOW_LIMIT = 3;
 
@@ -111,7 +113,7 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
   const [resolutionFiles, setResolutionFiles] = useState<File[]>([]);
   const [submittingResolution, setSubmittingResolution] = useState(false);
   const [resolutionError, setResolutionError] = useState<string | null>(null);
-  const [actionDone, setActionDone] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'progress' | 'resolution' | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -170,7 +172,6 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
         summary: resolutionSummary.trim(),
         detail: resolutionDetail.trim(),
       }, resolutionFiles);
-      setActionDone('Resolusi diajukan & menunggu persetujuan penutupan.');
       toast.success('Resolusi diajukan & menunggu persetujuan penutupan');
       const fresh = await getHandlerTicket(id);
       setTicket(fresh);
@@ -184,6 +185,14 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
     } finally {
       setSubmittingResolution(false);
     }
+  };
+
+  const handleConfirmProgress = async () => {
+    await submitProgress();
+  };
+
+  const handleConfirmResolution = async () => {
+    await submitResolution();
   };
 
   if (isLoading || !ticket) {
@@ -219,6 +228,9 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
   const resolutions = ticket.resolutions ?? [];
   const pastResolutions = resolutions.filter((r) => r.reviewDecision !== 'PENDING');
 
+  /** Resolusi yang disetujui terakhir — ditampilkan di kartu Status Resolusi saat tiket CLOSED. */
+  const approvedResolution = [...resolutions].reverse().find((r) => r.reviewDecision === 'APPROVED');
+
   // Boleh ajukan resolusi hanya saat tiket sedang dikerjakan atau rework
   const canSubmitResolution =
     ticket.status === 'IN_PROGRESS' || ticket.status === 'REWORK_REQUIRED';
@@ -236,13 +248,6 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
 
         <TicketChatDrawer ticketId={ticket.id} open={chatOpen} onOpenChange={setChatOpen} />
       </div>
-
-      {actionDone && (
-        <div className="flex items-center gap-2 rounded-lg border border-emerald-600/40 bg-emerald-500/10 p-4 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-          <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />
-          <span>{actionDone}</span>
-        </div>
-      )}
 
       {/* Header info */}
       <Card>
@@ -487,7 +492,7 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
                     </div>
                     <Button
                       size="sm"
-                      onClick={submitProgress}
+                      onClick={() => setConfirmAction('progress')}
                       className="h-9 w-full gap-1.5 text-xs"
                       disabled={submittingProgress || !progressNote.trim()}
                     >
@@ -548,7 +553,34 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {ticket.status === 'PENDING_REVIEW' && resolutions.length > 0 ? (
+              {ticket.status === 'CLOSED' ? (
+                <div className="space-y-2 rounded-lg border border-emerald-600/40 bg-emerald-50 dark:bg-emerald-950/20 p-3">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">Selesai — tiket telah ditutup</span>
+                  </div>
+                  {approvedResolution ? (
+                    <div className="space-y-1">
+                      <p className="text-xs leading-relaxed text-foreground">{approvedResolution.summary}</p>
+                      <p className="text-[11px] leading-relaxed text-muted-foreground">{approvedResolution.detail}</p>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                      Tidak ada data resolusi yang disetujui untuk tiket ini.
+                    </p>
+                  )}
+                </div>
+              ) : ticket.status === 'REJECTED' ? (
+                <div className="space-y-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+                  <div className="flex items-center gap-2">
+                    <XCircle className="size-3.5 text-destructive" />
+                    <span className="text-xs font-semibold text-destructive">Ditolak</span>
+                  </div>
+                  {ticket.rejectionReason && (
+                    <p className="text-xs text-muted-foreground">{ticket.rejectionReason}</p>
+                  )}
+                </div>
+              ) : ticket.status === 'PENDING_REVIEW' && resolutions.length > 0 ? (
                 <div className="space-y-2 rounded-lg border bg-amber-50 dark:bg-amber-950/20 p-3">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">Menunggu Persetujuan</span>
@@ -800,7 +832,7 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
               Batal
             </Button>
             <Button
-              onClick={submitResolution}
+              onClick={() => setConfirmAction('resolution')}
               size="sm"
               disabled={submittingResolution || !resolutionSummary.trim() || !resolutionDetail.trim()}
             >
@@ -810,6 +842,32 @@ export default function HandlerTicketDetailPage({ params }: { params: Promise<{ 
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <TicketTimeline activities={ticket.activities} />
+
+      {/* Konfirmasi sebelum aksi penting (SUBMIT PROGRESS / SUBMIT RESOLUTION) */}
+      <ConfirmDialog
+        open={confirmAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null);
+        }}
+        variant="default"
+        icon={<Send className="text-primary" />}
+        title={confirmAction === 'progress' ? 'Simpan progres pengerjaan?' : 'Ajukan resolusi tiket?'}
+        description={
+          confirmAction === 'progress'
+            ? 'Progres pengerjaan akan disimpan dan terlihat oleh reporter. Lanjutkan?'
+            : 'Resolusi akan diajukan dan menunggu persetujuan penutupan. Tiket akan berstatus PENDING_REVIEW. Lanjutkan?'
+        }
+        confirmLabel="Ya, Lanjutkan"
+        loading={submittingProgress || submittingResolution}
+        onConfirm={async () => {
+          const action = confirmAction;
+          setConfirmAction(null);
+          if (action === 'progress') await handleConfirmProgress();
+          else if (action === 'resolution') await handleConfirmResolution();
+        }}
+      />
 
       <UserDetailModal
         open={userDetailOpen}

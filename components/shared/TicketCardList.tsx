@@ -47,7 +47,7 @@ export function TicketCardList({ tickets, actionLabel, hrefBase, meta }: TicketC
               </div>
 
               <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                <span className="truncate">{ticket.customerData?.name ?? ticket.reporterName}</span>
+                <span className="truncate">{ticket.reporterName}</span>
                 {metaRow && (
                   <span className="shrink-0 text-right">
                     {metaRow.label}: <span className="font-medium text-foreground">{metaRow.value}</span>

@@ -234,10 +234,9 @@ export default function UnitDashboardPage() {
               </div>
             ) : (
               activities.map((item) => (
-                <Link
+                <div
                   key={item.key}
-                  href={`/unit/tiket/${item.ticketId}`}
-                  className="flex flex-wrap items-center justify-between gap-4 px-6 py-3 transition-colors hover:bg-accent/40"
+                  className="flex flex-wrap items-center justify-between gap-4 px-6 py-3 border-b last:border-0"
                 >
                   <div className="flex min-w-0 items-center gap-3">
                     <Avatar className="size-8">
@@ -273,8 +272,14 @@ export default function UnitDashboardPage() {
                         : '-'}
                     </span>
                     <StatusBadge status={item.status} />
+                    <Button variant="outline" size="sm" asChild className="gap-1 text-xs">
+                      <Link href={`/unit/tiket/${item.ticketId}`}>
+                        Detail
+                        <ArrowUpRight className="size-3" />
+                      </Link>
+                    </Button>
                   </div>
-                </Link>
+                </div>
               ))
             )}
           </CardContent>

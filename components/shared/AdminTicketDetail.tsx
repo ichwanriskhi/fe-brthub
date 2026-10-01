@@ -8,7 +8,9 @@ import { getAdminTicketDetail } from '@/lib/api/admin-ticket-monitoring';
 import { UserDetailModal, type UserDetailData } from '@/components/shared/UserDetailModal';
 import { StatusBadge, TypeBadge, PriorityBadge } from '@/components/shared/StatusBadge';
 import { TicketChatDrawer } from '@/components/shared/TicketChatDrawer';
+import { TicketTimeline } from '@/components/shared/TicketTimeline';
 import { ClaimItemsTable } from '@/components/shared/ClaimItemsTable';
+import { RevisionDiff } from '@/components/shared/RevisionDiff';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -531,25 +533,12 @@ export function AdminTicketDetail({
                   })}
                 </p>
                 {ticket.latestRevision.notes && (
-                  <p className="text-xs text-foreground">{ticket.latestRevision.notes}</p>
-                )}
-                {Object.keys(ticket.latestRevision.changes).length > 0 && (
-                  <div className="rounded-lg border bg-muted/20 p-3 space-y-1.5">
-                    {Object.entries(ticket.latestRevision.changes).map(([field, diff]) => {
-                      const d = diff as { old: unknown; new: unknown };
-                      return (
-                        <div key={field} className="text-xs">
-                          <span className="font-semibold text-muted-foreground">{field}: </span>
-                          <span className="line-through text-destructive/70">
-                            {String(d.old ?? '-')}
-                          </span>
-                          {' → '}
-                          <span className="text-emerald-600">{String(d.new ?? '-')}</span>
-                        </div>
-                      );
-                    })}
+                  <div className="space-y-1">
+                    <p className="text-[11px] font-semibold text-muted-foreground">Catatan reviewer</p>
+                    <p className="text-xs text-foreground">{ticket.latestRevision.notes}</p>
                   </div>
                 )}
+                <RevisionDiff changes={ticket.latestRevision.changes} />
               </CardContent>
             </Card>
           )}
@@ -741,6 +730,8 @@ export function AdminTicketDetail({
           </Card>
         </div>
       </div>
+
+      <TicketTimeline activities={ticket.activities} />
 
       <UserDetailModal
         open={userDetailOpen}

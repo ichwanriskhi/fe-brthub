@@ -70,7 +70,6 @@ export default function UnitQueuePage() {
   const [employeeLoading, setEmployeeLoading] = useState(false);
   const [selectedHandler, setSelectedHandler] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -152,7 +151,6 @@ export default function UnitQueuePage() {
   const openAssignDialog = (ticket: Ticket) => {
     setAssignTarget(ticket);
     setSelectedHandler('');
-    setSubmitError(null);
     setEmployees([]);
     setEmployeeLoading(true);
     // Handler harus dari departemen yang menerima tiket (backend memvalidasi).
@@ -165,7 +163,7 @@ export default function UnitQueuePage() {
         setEmployees(filtered);
       })
       .catch((error: unknown) => {
-        setSubmitError(error instanceof Error ? error.message : 'Gagal memuat daftar handler.');
+        toast.error(error instanceof Error ? error.message : 'Gagal memuat daftar handler.');
       })
       .finally(() => setEmployeeLoading(false));
   };
@@ -177,7 +175,6 @@ export default function UnitQueuePage() {
       return;
     }
     setSubmitting(true);
-    setSubmitError(null);
     try {
       await assignHandler(assignTarget.id, selectedHandler);
       const handler = employees.find((e) => e.id === selectedHandler);
@@ -188,7 +185,7 @@ export default function UnitQueuePage() {
       setTickets(fresh.data);
       setServerLastPage(fresh.lastPage);
     } catch (error: unknown) {
-      setSubmitError(error instanceof Error ? error.message : 'Gagal menugaskan handler.');
+      toast.error(error instanceof Error ? error.message : 'Gagal menugaskan handler.');
     } finally {
       setSubmitting(false);
     }
@@ -456,13 +453,6 @@ export default function UnitQueuePage() {
               </FieldDescription>
             </Field>
           </FieldGroup>
-
-          {submitError && (
-            <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">
-              <AlertCircle className="mt-0.5 size-4 shrink-0" />
-              <span>{submitError}</span>
-            </div>
-          )}
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setAssignTarget(null)} disabled={submitting}>

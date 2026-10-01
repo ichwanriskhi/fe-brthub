@@ -185,7 +185,7 @@ export function IdentifyReporterModal({
                 <FieldLabel>Pegawai</FieldLabel>
                 <div className="relative">
                   <Select
-                    value={selectedEmployeeId || undefined}
+                    value={selectedEmployeeId || null}
                     onValueChange={(v) => setSelectedEmployeeId(v ?? '')}
                     items={employeeOptions}
                   >
@@ -225,7 +225,7 @@ export function IdentifyReporterModal({
                 <FieldLabel>Customer</FieldLabel>
                 <div className="relative">
                   <Select
-                    value={selectedCustomerId || undefined}
+                    value={selectedCustomerId || null}
                     onValueChange={(v) => setSelectedCustomerId(v ?? '')}
                     items={customerOptions}
                   >

@@ -247,7 +247,7 @@ export function ApprovalQueue({
                     </div>
                   </TableCell>
                   <TableCell className="px-6 py-3">
-                    <span className="text-sm">{ticket.customerData?.name ?? ticket.reporterName}</span>
+                    <span className="text-sm">{ticket.reporterName}</span>
                   </TableCell>
                   <TableCell className="px-6 py-3">
                     <TypeBadge ticketType={ticket.ticketType} />

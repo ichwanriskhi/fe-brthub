@@ -9,6 +9,7 @@ import { reporterDisplay, customerDisplayName } from '@/lib/utils/ticket-display
 import { StatusBadge, TypeBadge, PriorityBadge } from '@/components/shared/StatusBadge';
 import { UserDetailModal, type UserDetailData } from '@/components/shared/UserDetailModal';
 import { ClaimItemsTable } from '@/components/shared/ClaimItemsTable';
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { TicketChatDrawer } from '@/components/shared/TicketChatDrawer';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -45,10 +46,8 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
   const [employeeLoading, setEmployeeLoading] = useState(false);
   const [selectedHandler, setSelectedHandler] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [confirmReplace, setConfirmReplace] = useState(false);
   const [showReplaceForm, setShowReplaceForm] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [actionDone, setActionDone] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'assign' | 'replace' | null>(null);
 
   const [userDetailOpen, setUserDetailOpen] = useState(false);
   const [userDetailTitle, setUserDetailTitle] = useState('');
@@ -131,20 +130,22 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
       return;
     }
     setSubmitting(true);
-    setSubmitError(null);
     try {
       await assignHandler(ticket.id, selectedHandler);
       const handler = employees.find((e) => e.id === selectedHandler);
-      setActionDone(`Tiket ${ticket.id} ditugaskan ke ${handler?.full_name}.`);
       toast.success(`Tiket ${ticket.id} ditugaskan ke ${handler?.full_name}.`);
       const fresh = await getUnitTicket(id);
       setTicket(fresh);
       setSelectedHandler('');
     } catch (error: unknown) {
-      setSubmitError(error instanceof Error ? error.message : 'Gagal menugaskan handler.');
+      toast.error(error instanceof Error ? error.message : 'Gagal menugaskan handler.');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleConfirmAssign = async () => {
+    await confirmAssign();
   };
 
   if (isLoading || !ticket) {
@@ -183,13 +184,6 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
         </Button>
         <TicketChatDrawer ticketId={ticket.id} open={chatOpen} onOpenChange={setChatOpen} readOnly />
       </div>
-
-      {actionDone && (
-        <div className="flex items-center gap-2 rounded-lg border border-emerald-600/40 bg-emerald-500/10 p-4 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-          <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />
-          <span>{actionDone}</span>
-        </div>
-      )}
 
       {/* Header info */}
       <Card>
@@ -431,51 +425,21 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
                     kiri. Mengganti handler akan menonaktifkan handler saat ini.
                   </p>
                 )}
-                {confirmReplace ? (
-                  <div className="space-y-2 rounded-lg border border-amber-600/40 bg-amber-500/5 p-3 text-xs">
-                    <span className="font-semibold text-foreground">
-                      Yakin ganti handler?
-                    </span>
-                    <p className="text-muted-foreground">
-                      Handler aktif akan dinonaktifkan dan tiket diteruskan ke handler baru.
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        className="flex-1 gap-1.5 text-xs"
-                        onClick={() => {
-                          setConfirmReplace(false);
-                          setShowReplaceForm(true);
-                        }}
-                      >
-                        Ya, lanjut
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-xs"
-                        onClick={() => setConfirmReplace(false)}
-                      >
-                        Batal
-                      </Button>
-                    </div>
-                  </div>
-                ) : showReplaceForm ? (
+                {showReplaceForm ? (
                   <Button
                     size="sm"
                     variant="outline"
                     className="w-full gap-1.5 text-xs"
                     onClick={() => setShowReplaceForm(false)}
                   >
-                    Bilih Pergantian Handler
+                    Batal Pergantian Handler
                   </Button>
                 ) : (
                   <Button
                     size="sm"
                     variant="outline"
                     className="w-full gap-1.5 text-xs"
-                    onClick={() => setConfirmReplace(true)}
+                    onClick={() => setConfirmAction('replace')}
                   >
                     <UserPlus className="size-3.5" />
                     Ganti Handler
@@ -540,15 +504,8 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
                   </FieldDescription>
                 </Field>
 
-                {submitError && (
-                  <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">
-                    <AlertCircle className="mt-0.5 size-4 shrink-0" />
-                    <span>{submitError}</span>
-                  </div>
-                )}
-
                 <Button
-                  onClick={confirmAssign}
+                  onClick={() => setConfirmAction(showReplaceForm ? 'replace' : 'assign')}
                   className="w-full gap-1.5"
                   disabled={submitting || !selectedHandler || employees.length === 0}
                 >
@@ -557,7 +514,7 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
                   ) : (
                     <ClipboardCheck className="size-4" />
                   )}
-                  Konfirmasi Penugasan
+                  {showReplaceForm ? 'Konfirmasi Ganti Handler' : 'Konfirmasi Penugasan'}
                 </Button>
               </FieldGroup>
             </CardContent>
@@ -613,6 +570,40 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
         onOpenChange={setUserDetailOpen}
         title={userDetailTitle}
         user={userDetailData}
+      />
+
+      {/* Konfirmasi sebelum aksi penting (ASSIGN / REPLACE HANDLER) */}
+      <ConfirmDialog
+        open={confirmAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null);
+        }}
+        variant={confirmAction === 'replace' ? 'destructive' : 'default'}
+        icon={
+          confirmAction === 'replace' ? (
+            <AlertCircle className="text-destructive" />
+          ) : (
+            <ClipboardCheck className="text-primary" />
+          )
+        }
+        title={confirmAction === 'replace' ? 'Ganti handler aktif?' : 'Tugaskan handler?'}
+        description={
+          confirmAction === 'replace'
+            ? `Handler aktif (${ticket?.handlerName}) akan dinonaktifkan dan tiket diteruskan ke ${employees.find((e) => e.id === selectedHandler)?.full_name || 'handler baru'}. Lanjutkan?`
+            : `Tiket akan ditugaskan ke ${employees.find((e) => e.id === selectedHandler)?.full_name || 'handler terpilih'}. Lanjutkan?`
+        }
+        confirmLabel={confirmAction === 'replace' ? 'Ya, Ganti' : 'Ya, Tugaskan'}
+        loading={submitting}
+        onConfirm={async () => {
+          const action = confirmAction;
+          setConfirmAction(null);
+          if (action === 'assign') {
+            await handleConfirmAssign();
+          } else if (action === 'replace') {
+            await handleConfirmAssign();
+            setShowReplaceForm(false);
+          }
+        }}
       />
     </div>
   );

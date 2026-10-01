@@ -61,7 +61,7 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
   useEffect(() => {
     let cancelled = false;
 
-    getMyTicket(id)
+    getMyTicket(id, { asReporter: true })
       .then((data) => {
         if (cancelled) return;
         setTicket(data);

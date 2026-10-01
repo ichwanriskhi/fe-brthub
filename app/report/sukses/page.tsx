@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Loader2 } from 'lucide-react';
+import { SuccessAnimation } from '@/components/shared/SuccessAnimation';
 
 interface TicketData {
   id: number;
@@ -85,8 +86,11 @@ function ReportSuccessContent() {
   }, [ticketId, ticketNoParam, API_URL]);
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="w-full max-w-md space-y-6 text-center">
+    <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4 py-6 sm:px-6 lg:px-8">
+      <div className="w-full max-w-md space-y-4 text-center">
+        {/* Lottie Success Animation */}
+        <SuccessAnimation />
+
         <div className="space-y-2">
           <h1 className="text-2xl font-bold tracking-tight">Laporan Berhasil Terkirim!</h1>
           <p className="text-xs leading-relaxed text-muted-foreground">

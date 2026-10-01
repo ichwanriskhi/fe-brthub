@@ -47,6 +47,7 @@ export default function ReportHistoryPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const { unread } = useReporterUnread();
 
   useEffect(() => {
@@ -67,7 +68,7 @@ export default function ReportHistoryPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   /** Pesan belum dibaca percakapan reporter<->admin untuk satu tiket. */
   const unreadFor = (ticketId: string) => unread[reporterChatId(ticketId)] ?? 0;
@@ -82,13 +83,13 @@ export default function ReportHistoryPage() {
     const matchesType = !filterValues.type || ticket.ticketType === filterValues.type;
     const matchesCategory = !filterValues.category || ticket.category === filterValues.category;
     const q = searchQuery.trim().toLowerCase();
-    const customerName = (ticket.customerData?.name ?? ticket.reporterName).toLowerCase();
     const matchesSearch =
       q === '' ||
       ticket.subject.toLowerCase().includes(q) ||
       (ticket.soNumber ?? '').toLowerCase().includes(q) ||
       ticket.id.toLowerCase().includes(q) ||
-      customerName.includes(q);
+      ticket.reporterName.toLowerCase().includes(q) ||
+      (ticket.customerData?.name?.toLowerCase().includes(q) ?? false);
     const created = new Date(ticket.createdAt);
     const matchesDate =
       !dateRange?.from ||
@@ -100,6 +101,19 @@ export default function ReportHistoryPage() {
   const totalPages = Math.max(1, Math.ceil(filteredTickets.length / TICKETS_PER_PAGE));
   const safePage = Math.min(currentPage, totalPages);
   const paginatedTickets = filteredTickets.slice((safePage - 1) * TICKETS_PER_PAGE, safePage * TICKETS_PER_PAGE);
+
+  /** Ada filter/search/tanggal aktif yang bisa direset. */
+  const hasActiveFilters =
+    Object.values(filterValues).some((v) => v != null && v !== '') ||
+    searchQuery.trim() !== '' ||
+    dateRange !== undefined;
+
+  const resetFilters = () => {
+    setFilterValues({});
+    setSearchQuery('');
+    setDateRange(undefined);
+    setCurrentPage(1);
+  };
 
   return (
     <div className="container mx-auto px-4 py-6 md:py-10 max-w-5xl space-y-6">
@@ -152,26 +166,50 @@ export default function ReportHistoryPage() {
             <FileText className="size-8 text-muted-foreground mx-auto" />
             <div>
               <p className="text-sm font-semibold">
-                {isLoading ? 'Memuat laporan…' : loadError ? 'Gagal memuat laporan' : 'Tidak ada laporan ditemukan'}
+                {isLoading
+                  ? 'Memuat laporan…'
+                  : loadError
+                    ? 'Gagal memuat laporan'
+                    : tickets.length === 0
+                      ? 'Belum ada laporan'
+                      : 'Tidak ada laporan yang cocok'}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
                 {isLoading
                   ? 'Mengambil data dari server…'
                   : loadError
-                  ? loadError
-                  : 'Coba ubah filter status atau kata kunci pencarian.'}
+                    ? loadError
+                    : tickets.length === 0
+                      ? 'Akun ini belum pernah mengajukan laporan. Buat laporan pertama Anda.'
+                      : 'Coba ubah filter status atau kata kunci pencarian.'}
               </p>
             </div>
-            {!isLoading && !loadError && (
+            {!isLoading && loadError && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  setFilterValues({});
-                  setSearchQuery('');
-                  setDateRange(undefined);
-                  setCurrentPage(1);
+                  setLoadError(null);
+                  setIsLoading(true);
+                  setReloadKey((k) => k + 1);
                 }}
+              >
+                Coba lagi
+              </Button>
+            )}
+            {!isLoading && !loadError && tickets.length === 0 && (
+              <Button size="sm" asChild className="gap-2">
+                <Link href="/report/new">
+                  <Plus className="size-4" />
+                  <span>Buat Laporan Pertama</span>
+                </Link>
+              </Button>
+            )}
+            {!isLoading && !loadError && tickets.length > 0 && hasActiveFilters && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={resetFilters}
               >
                 Reset Filter
               </Button>
@@ -256,7 +294,7 @@ export default function ReportHistoryPage() {
                         <div className="space-y-0.5 max-w-[260px]">
                           <p className="font-medium text-sm leading-none truncate">{ticket.subject}</p>
                           <p className="text-xs text-muted-foreground truncate">
-                            {ticket.customerData?.name ?? ticket.reporterName} · SO: {ticket.soNumber ?? '-'}
+                            {ticket.reporterName} · SO: {ticket.soNumber ?? '-'}
                           </p>
                         </div>
                       </TableCell>

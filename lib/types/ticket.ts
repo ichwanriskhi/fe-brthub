@@ -169,6 +169,12 @@ export interface Ticket {
   handlerProgress?: HandlerProgress[];
 
   /**
+   * Timeline kronologis tiket dari pembuatan sampai selesai
+   * (ditulis backend via TicketActivityLogger di setiap aksi workflow).
+   */
+  activities?: TicketActivityEntry[];
+
+  /**
    * Riwayat assignment handler ke tiket ini (dipilih oleh unit). Untuk
    * halaman unit: handler aktif + yang sudah diganti.
    */
@@ -214,6 +220,16 @@ export interface HandlerProgress {
   attachments?: TicketAttachment[];
   /** Nama pegawai yang mencatat progres (dari backend) */
   actorName?: string;
+}
+
+/** Satu baris timeline aktivitas tiket (kronologis sistem, bukan chat) */
+export interface TicketActivityEntry {
+  id: string;
+  activityType: string;
+  description: string;
+  /** Nama aktor (dari backend) */
+  actorName?: string;
+  createdAt: string;
 }
 
 /** Assignment handler pada sebuah tiket (dipilih oleh unit) */

@@ -8,7 +8,10 @@ import type { Ticket } from '@/lib/types/ticket';
 import { isDistributionClaim, HANDLER_ACTIONS } from '@/lib/constants/reviewer';
 import { StatusBadge, TypeBadge, PriorityBadge } from '@/components/shared/StatusBadge';
 import { TicketChatDrawer } from '@/components/shared/TicketChatDrawer';
+import { TicketTimeline } from '@/components/shared/TicketTimeline';
 import { ClaimItemsTable } from '@/components/shared/ClaimItemsTable';
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -29,6 +32,7 @@ import {
   ShieldCheck,
   ClipboardCheck,
   History,
+  Send,
 } from 'lucide-react';
 
 interface ApprovalDetailProps {
@@ -58,11 +62,10 @@ export function ApprovalDetail({ id, stage, backHref, readOnly = false }: Approv
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
-  const [actionDone, setActionDone] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [showRejectForm, setShowRejectForm] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<'approve' | 'reject' | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,17 +94,16 @@ export function ApprovalDetail({ id, stage, backHref, readOnly = false }: Approv
   const handleApprove = async () => {
     if (!ticket) return;
     setSubmitting(true);
-    setSubmitError(null);
     try {
       await decideApproval(id, { decision: 'APPROVE', stage });
-      setActionDone(
+      toast.success(
         isFinal
           ? 'Penutupan tiket disetujui. Tiket telah selesai.'
           : 'Tiket disetujui dan diteruskan ke unit untuk ditindak lanjuti.',
       );
       setTimeout(() => router.push(backHref), 1500);
     } catch (error: unknown) {
-      setSubmitError(error instanceof Error ? error.message : 'Gagal memproses persetujuan.');
+      toast.error(error instanceof Error ? error.message : 'Gagal memproses persetujuan.');
     } finally {
       setSubmitting(false);
     }
@@ -110,21 +112,20 @@ export function ApprovalDetail({ id, stage, backHref, readOnly = false }: Approv
   const handleReject = async () => {
     if (!ticket) return;
     if (!rejectionReason.trim()) {
-      setSubmitError('Alasan penolakan wajib diisi.');
+      toast.error('Alasan penolakan wajib diisi.');
       return;
     }
     setSubmitting(true);
-    setSubmitError(null);
     try {
       await decideApproval(id, { decision: 'REJECT', stage, rejection_reason: rejectionReason.trim() });
-      setActionDone(
+      toast.success(
         isFinal
           ? 'Resolusi ditolak — tiket dikembalikan ke handler untuk diperbaiki.'
           : 'Tiket ditolak.',
       );
       setTimeout(() => router.push(backHref), 1500);
     } catch (error: unknown) {
-      setSubmitError(error instanceof Error ? error.message : 'Gagal memproses penolakan.');
+      toast.error(error instanceof Error ? error.message : 'Gagal memproses penolakan.');
     } finally {
       setSubmitting(false);
     }
@@ -158,13 +159,6 @@ export function ApprovalDetail({ id, stage, backHref, readOnly = false }: Approv
 
         <TicketChatDrawer ticketId={ticket.id} open={chatOpen} onOpenChange={setChatOpen} readOnly />
       </div>
-
-      {actionDone && (
-        <div className="bg-emerald-500/10 border-emerald-600/40 text-emerald-700 dark:text-emerald-400 flex items-center gap-2 rounded-lg border p-4 text-xs font-semibold">
-          <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />
-          <span>{actionDone}</span>
-        </div>
-      )}
 
       {/* Ticket Brief Header */}
       <Card>
@@ -557,19 +551,7 @@ export function ApprovalDetail({ id, stage, backHref, readOnly = false }: Approv
                 </div>
               )}
 
-              {submitError && (
-                <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">
-                  <AlertCircle className="mt-0.5 size-4 shrink-0" />
-                  <span>{submitError}</span>
-                </div>
-              )}
-
-              {actionDone ? (
-                <div className="flex items-start gap-2 rounded-lg border border-emerald-600/40 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-400">
-                  <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
-                  <span>{actionDone}</span>
-                </div>
-              ) : readOnly ? (
+              {readOnly ? (
                 /* ── Mode riwayat: tidak ada aksi, hanya ringkasan keputusan ── */
                 <div className="space-y-2 rounded-lg border bg-muted/40 p-3 text-xs">
                   <div className="flex items-center gap-2">
@@ -592,7 +574,7 @@ export function ApprovalDetail({ id, stage, backHref, readOnly = false }: Approv
               ) : showRejectForm ? (
                 <div className="flex items-center gap-2">
                   <Button
-                    onClick={handleReject}
+                    onClick={() => setConfirmAction('reject')}
                     disabled={submitting}
                     variant="destructive"
                     className="flex-1 gap-2 text-xs font-semibold"
@@ -604,7 +586,6 @@ export function ApprovalDetail({ id, stage, backHref, readOnly = false }: Approv
                     onClick={() => {
                       setShowRejectForm(false);
                       setRejectionReason('');
-                      setSubmitError(null);
                     }}
                     disabled={submitting}
                     variant="outline"
@@ -616,7 +597,7 @@ export function ApprovalDetail({ id, stage, backHref, readOnly = false }: Approv
               ) : (
                 <div className="flex items-center gap-2">
                   <Button
-                    onClick={handleApprove}
+                    onClick={() => setConfirmAction('approve')}
                     disabled={submitting}
                     className="flex-1 gap-2 text-xs font-semibold"
                   >
@@ -647,6 +628,42 @@ export function ApprovalDetail({ id, stage, backHref, readOnly = false }: Approv
           </Card>
         </div>
       </div>
+
+      <TicketTimeline activities={ticket.activities} />
+
+      {/* Konfirmasi sebelum aksi penting (APPROVE / REJECT) */}
+      <ConfirmDialog
+        open={confirmAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null);
+        }}
+        variant={confirmAction === 'reject' ? 'destructive' : 'default'}
+        icon={
+          confirmAction === 'reject' ? (
+            <AlertCircle className="text-destructive" />
+          ) : (
+            <CheckCircle2 className="text-primary" />
+          )
+        }
+        title={confirmAction === 'reject' ? 'Tolak tiket ini?' : isFinal ? 'Setujui penutupan tiket?' : 'Setujui tiket ini?'}
+        description={
+          confirmAction === 'reject'
+            ? isFinal
+              ? 'Resolusi handler akan ditolak dan tiket dikembalikan ke handler untuk diperbaiki. Lanjutkan?'
+              : 'Tiket akan ditolak dan tidak dapat dibatalkan. Lanjutkan?'
+            : isFinal
+              ? 'Penutupan tiket disetujui. Tiket akan ditutup dan selesai. Lanjutkan?'
+              : 'Tiket akan diteruskan ke unit untuk ditindak lanjuti. Lanjutkan?'
+        }
+        confirmLabel={confirmAction === 'reject' ? 'Ya, Tolak' : 'Ya, Setujui'}
+        loading={submitting}
+        onConfirm={() => {
+          const action = confirmAction;
+          setConfirmAction(null);
+          if (action === 'approve') void handleApprove();
+          else if (action === 'reject') void handleReject();
+        }}
+      />
     </div>
   );
 }

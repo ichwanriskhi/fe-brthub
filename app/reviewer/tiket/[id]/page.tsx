@@ -28,8 +28,10 @@ import {
 import { UserDetailModal, type UserDetailData } from '@/components/shared/UserDetailModal';
 import { StatusBadge, TypeBadge } from '@/components/shared/StatusBadge';
 import { TicketChatDrawer } from '@/components/shared/TicketChatDrawer';
+import { TicketTimeline } from '@/components/shared/TicketTimeline';
 import { ClaimItemsTable } from '@/components/shared/ClaimItemsTable';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -64,7 +66,6 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
-  const [actionDone, setActionDone] = useState<string | null>(null);
 
   const [userDetailOpen, setUserDetailOpen] = useState(false);
   const [userDetailTitle, setUserDetailTitle] = useState('');
@@ -453,7 +454,7 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
         action_id: handlerAction || undefined,
         revisions: Object.keys(revisions).length > 0 ? revisions : undefined,
       });
-      setActionDone(`Tinjauan awal disimpan — tiket diteruskan ke ${workflowTarget}.`);
+      toast.success(`Tinjauan awal disimpan — tiket diteruskan ke ${workflowTarget}.`);
       setTimeout(() => router.push('/reviewer/tinjauan-awal'), 1500);
     } catch (error: unknown) {
       setSubmitError(error instanceof Error ? error.message : 'Gagal mengirim hasil review.');
@@ -468,7 +469,7 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
     setSubmitError(null);
     try {
       await submitReview(id, { decision: 'REJECT' });
-      setActionDone('Laporan ditolak.');
+      toast.success('Laporan ditolak.');
       setTimeout(() => router.push('/reviewer/tinjauan-awal'), 1500);
     } catch (error: unknown) {
       setSubmitError(error instanceof Error ? error.message : 'Gagal menolak tiket.');
@@ -561,13 +562,6 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
 
         <TicketChatDrawer ticketId={ticket.id} open={chatOpen} onOpenChange={setChatOpen} />
       </div>
-
-      {actionDone && (
-        <div className="bg-emerald-500/10 border-emerald-600/40 text-emerald-700 dark:text-emerald-400 flex items-center gap-2 rounded-lg border p-4 text-xs font-semibold">
-          <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />
-          <span>{actionDone}</span>
-        </div>
-      )}
 
       {/* Ticket Brief Header */}
       <Card>
@@ -1074,6 +1068,8 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
           </Card>
         </div>
       </div>
+
+      <TicketTimeline activities={ticket.activities} />
 
       <UserDetailModal
         open={userDetailOpen}

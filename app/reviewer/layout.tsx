@@ -32,8 +32,6 @@ const NAV_GROUPS: NavGroup[] = [
 const ROUTE_LABELS: Record<string, string> = {
   '/reviewer': 'Dashboard',
   '/reviewer/tinjauan-awal': 'Tinjauan Awal',
-  '/reviewer/tinjauan-akhir': 'Tinjauan Akhir',
-  '/reviewer/penutupan': 'Penutupan Akhir',
   '/reviewer/riwayat': 'Arsip & Riwayat',
 };
 
@@ -42,29 +40,19 @@ const ROUTE_LABELS: Record<string, string> = {
 function ReviewerBreadcrumb({ pathname }: { pathname: string }) {
   const segments = pathname.split('/').filter(Boolean);
   const isTicketDetail = segments[1] === 'tiket' && segments.length >= 3;
-  const isFinalReview = isTicketDetail && segments[3] === 'tinjauan-akhir';
-  const isFinalClosure = isTicketDetail && segments[3] === 'penutupan';
 
   let crumbs: { href: string; label: string; isLast: boolean }[] = [];
   if (isTicketDetail) {
     crumbs = [
       { href: '/reviewer', label: 'Dashboard', isLast: false },
       {
-        href: isFinalClosure
-          ? '/reviewer/penutupan'
-          : isFinalReview
-          ? '/reviewer/tinjauan-akhir'
-          : '/reviewer/tinjauan-awal',
-        label: isFinalClosure
-          ? 'Penutupan Akhir'
-          : isFinalReview
-          ? 'Tinjauan Akhir'
-          : 'Tinjauan Awal',
+        href: '/reviewer/tinjauan-awal',
+        label: 'Tinjauan Awal',
         isLast: false,
       },
       {
         href: pathname,
-        label: isFinalClosure ? 'Penutupan Akhir' : isFinalReview ? 'Verifikasi Akhir' : 'Detail Tiket',
+        label: 'Detail Tiket',
         isLast: true,
       },
     ];

@@ -1,13 +1,16 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { ModeToggle } from '@/components/shared/ModeToggle';
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { ShieldOff, ArrowLeft, LogIn } from 'lucide-react';
 import { useAuth } from '@/lib/auth/auth-context';
 
 export default function UnauthorizedPage() {
   const { isAuthenticated, logout } = useAuth();
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   return (
     <div className="flex min-h-svh flex-col bg-muted/20">
@@ -43,10 +46,22 @@ export default function UnauthorizedPage() {
                     Kembali ke Beranda
                   </Link>
                 </Button>
-                <Button variant="destructive" onClick={() => logout()}>
+                <Button variant="destructive" onClick={() => setConfirmOpen(true)}>
                   <LogIn className="size-4" />
                   Keluar &amp; Login Ulang
                 </Button>
+                <ConfirmDialog
+                  open={confirmOpen}
+                  onOpenChange={setConfirmOpen}
+                  variant="destructive"
+                  title="Keluar dari BRTHub?"
+                  description="Sesi kerja Anda akan diakhiri. Anda perlu login kembali untuk mengakses dashboard."
+                  confirmLabel="Ya, Keluar"
+                  onConfirm={() => {
+                    setConfirmOpen(false);
+                    logout();
+                  }}
+                />
               </>
             ) : (
               <Button asChild>

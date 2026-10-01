@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ModeToggle } from '@/components/shared/ModeToggle';
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { cn } from '@/lib/utils';
 import { authServiceClient } from '@/lib/api/auth-service';
 import { Bell, FilePlus2, Files, LogOut, User } from 'lucide-react';
@@ -45,6 +46,7 @@ export function ReporterNavbar() {
   const pathname = usePathname();
   const router   = useRouter();
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   // Read user profile from localStorage (written after OTP verify)
   useEffect(() => {
@@ -59,6 +61,7 @@ export function ReporterNavbar() {
   const initials       = getInitials(displayName);
 
   const handleLogout = async () => {
+    setConfirmOpen(false);
     const token = localStorage.getItem('auth_token');
 
     // Revoke the Auth Service token (best-effort) and clear the reporter
@@ -71,10 +74,11 @@ export function ReporterNavbar() {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('user_profile');
     sessionStorage.removeItem('reporter_data');
-    router.push('/login');
+    router.push('/verifikasi');
   };
 
   return (
+    <>
     <header className="sticky top-0 z-40 w-full shrink-0 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto flex h-16 max-w-5xl items-center justify-between gap-3 px-4 sm:px-6">
         <Link href="/report/new" className="flex min-w-0 items-center gap-2.5">
@@ -151,7 +155,7 @@ export function ReporterNavbar() {
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem variant="destructive" onClick={handleLogout}>
+                <DropdownMenuItem variant="destructive" onClick={() => setConfirmOpen(true)}>
                   <LogOut />
                   <span>Keluar</span>
                 </DropdownMenuItem>
@@ -182,5 +186,15 @@ export function ReporterNavbar() {
         })}
       </nav>
     </header>
+    <ConfirmDialog
+      open={confirmOpen}
+      onOpenChange={setConfirmOpen}
+      variant="destructive"
+      title="Keluar dari BRTHub?"
+      description="Sesi laporan Anda akan diakhiri. Anda perlu verifikasi ulang untuk membuat laporan baru."
+      confirmLabel="Ya, Keluar"
+      onConfirm={handleLogout}
+    />
+    </>
   );
 }

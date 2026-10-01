@@ -2,8 +2,9 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { brthubApi, MeUser, BrthubData, ROLE_REDIRECT } from '@/lib/api/brthub-api';
+import { brthubApi, defaultRole, MeUser, BrthubData, ROLE_REDIRECT } from '@/lib/api/brthub-api';
 import type { AppRole } from '@/lib/api/brthub-api';
+import { toast } from 'sonner';
 
 // ─── Storage keys ─────────────────────────────────────────────────────────────
 
@@ -28,7 +29,11 @@ export interface AuthContextValue {
   token: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (token: string, refreshToken: string, user: AuthUser) => void;
+  /**
+   * `activeRole` opsional: role yang sedang dibuka (dari halaman tujuan).
+   * Selalu diisi saat login agar badge = halaman, satu sumber kebenaran.
+   */
+  login: (token: string, refreshToken: string, user: AuthUser, activeRole?: string | null) => void;
   logout: () => Promise<void>;
   hasRole: (role: string) => boolean;
   /**
@@ -93,21 +98,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const login = useCallback((accessToken: string, refreshToken: string, authUser: AuthUser) => {
+  const login = useCallback((accessToken: string, refreshToken: string, authUser: AuthUser, role?: string | null) => {
     localStorage.setItem(TOKEN_KEY, accessToken);
     localStorage.setItem(REFRESH_KEY, refreshToken);
     localStorage.setItem(USER_KEY, JSON.stringify(authUser));
     setToken(accessToken);
     setUser(authUser);
+    // Sinkronkan role aktif saat login — badge dan halaman tujuan
+    // dihitung dari nilai yang sama, tidak lagi dari dua urutan berbeda.
+    if (role) {
+      localStorage.setItem(ACTIVE_ROLE_KEY, role);
+      setActiveRoleState(role);
+    }
   }, []);
 
+  // Koreksi role aktif basi (mis. role dicabut admin) ke default prioritas
+  // begitu user termuat. Dijaga `user !== null` agar tidak menghapus
+  // preferensi tersimpan sebelum rehidrasi selesai.
+  useEffect(() => {
+    if (user === null) return;
+    if (activeRole && availableRoles.includes(activeRole)) return;
+    const fallback = defaultRole(availableRoles);
+    if (fallback && fallback !== activeRole) {
+      localStorage.setItem(ACTIVE_ROLE_KEY, fallback);
+      setActiveRoleState(fallback);
+    }
+  }, [user, availableRoles, activeRole]);
+
   const logout = useCallback(async () => {
-    if (token) {
-      try {
-        await brthubApi.logout(token);
-      } catch {
-        // Best-effort — always clear local state
-      }
+    try {
+      await brthubApi.logout();
+      toast.success('Logout berhasil.');
+    } catch {
+      // Best-effort — always clear local state
     }
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(REFRESH_KEY);
@@ -117,7 +140,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setActiveRoleState(null);
     router.push('/login');
-  }, [token, router]);
+  }, [router]);
 
   const hasRole = useCallback(
     (role: string) => availableRoles.includes(role),

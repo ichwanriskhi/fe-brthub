@@ -31,7 +31,7 @@ import {
   FieldSet,
   FieldTitle,
 } from '@/components/ui/field';
-import { ArrowRight, ArrowLeft, Check, UploadCloud, XIcon, PlusIcon, Loader2 } from 'lucide-react';
+import { ArrowRight, ArrowLeft, UploadCloud, XIcon, PlusIcon, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -218,7 +218,6 @@ export default function CreateReportPage() {
   });
 
   const [attachments, setAttachments] = useState<File[]>([]);
-  const [draftSaved, setDraftSaved] = useState(false);
 
   const newClaimRow = createClaimRow;
 
@@ -371,7 +370,7 @@ export default function CreateReportPage() {
         // Fallback silently if master endpoint not ready
       });
 
-    // Fetch real tickets for relation dropdown
+    // Fetch real tickets for relation dropdown (sesi reporter)
     const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
     if (token) {
       fetch(API_URL + '/api/auth/tickets?mine=true&status_code=CLOSED', {
@@ -401,6 +400,10 @@ export default function CreateReportPage() {
     const timeout = setTimeout(() => controller.abort(), 5000);
 
     const init = async () => {
+      // Sesi reporter (auth_token) — konsisten dengan handleSubmit (baris
+      // pengiriman) dan getMyTickets/getMyTicket. brthub_token hanya ada
+      // untuk sesi staf, sehingga memakainya di sini membuat request
+      // identity-status tidak pernah terkirim untuk reporter.
       const token = localStorage.getItem('auth_token');
       const profileRaw = localStorage.getItem('user_profile');
       const authProfile: AuthUserProfile | null = profileRaw ? JSON.parse(profileRaw) : null;
@@ -578,15 +581,14 @@ export default function CreateReportPage() {
     }
 
     setStep((prev) => prev + 1);
+    window.scrollTo(0, 0);
   };
 
   const handlePrev = () => {
-    if (step > 0) setStep((prev) => prev - 1);
-  };
-
-  const handleSaveDraft = () => {
-    setDraftSaved(true);
-    toast.info('Draft berhasil disimpan');
+    if (step > 0) {
+      setStep((prev) => prev - 1);
+      window.scrollTo(0, 0);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -613,7 +615,7 @@ export default function CreateReportPage() {
       const token = localStorage.getItem('auth_token');
       if (!token) {
         toast.error('Sesi login telah berakhir. Silakan login kembali.');
-        router.push('/login');
+        router.push('/verifikasi?next=/report/new');
         return;
       }
 
@@ -788,9 +790,11 @@ export default function CreateReportPage() {
 
   // ── Step Renderers ────────────────────────────────────────────────────────────
 
-  // Step: Siapa Anda (Hanya untuk user baru)
+  // Step: Siapa Anda (Hanya untuk user baru — identitas belum terdefinisi
+  // di backend. User lama (pegawai/customer terdaftar) tidak ditanya lagi;
+  // userType-nya sudah diisi dari identity-status.)
   const renderUserTypeStep = () => {
-    if (profileComplete) return null;
+    if (identityDefined || profileComplete) return null;
     return (
     <FieldSet>
       <FieldLegend variant="label">Siapa Anda?</FieldLegend>
@@ -1074,7 +1078,7 @@ export default function CreateReportPage() {
               id="subject"
               value={formData.subject}
               onChange={(e) => setField('subject', e.target.value)}
-              placeholder="Contoh: Kekurangan pengiriman part Juken 5+"
+              placeholder="Ketik subjek masalah yang dialami..."
             />
           </Field>
 
@@ -1147,7 +1151,7 @@ export default function CreateReportPage() {
                                     className="h-auto p-0 text-xs"
                                     onClick={() => updateClaimRow(row.id, { hasSecondColumn: !row.hasSecondColumn })}
                                   >
-                                    {row.hasSecondColumn ? '− Hapus Kolom Pembanding' : '+ Tambah Kolom Pembanding'}
+                                    {row.hasSecondColumn ? '− Kolom 2' : '+ Kolom 2'}
                                   </Button>
                                 )}
                                 {claimConfig && (
@@ -1192,7 +1196,7 @@ export default function CreateReportPage() {
                                       onValueChange={(v) => v && updateClaimRow(row.id, { role1: v as ClaimItemRole })}
                                       items={CLAIM_ITEM_ROLES}
                                     >
-                                      <SelectTrigger id={`role1-${row.id}`} className="w-full sm:w-[220px]">
+                                      <SelectTrigger id={`role1-${row.id}`} className="w-full">
                                         <SelectValue placeholder="Pilih Tipe Barang" />
                                       </SelectTrigger>
                                       <SelectContent>
@@ -1255,7 +1259,7 @@ export default function CreateReportPage() {
                                         onValueChange={(v) => v && updateClaimRow(row.id, { role2: v as ClaimItemRole })}
                                         items={CLAIM_ITEM_ROLES}
                                       >
-                                        <SelectTrigger id={`role2-${row.id}`} className="w-full sm:w-[220px]">
+                                        <SelectTrigger id={`role2-${row.id}`} className="w-full">
                                           <SelectValue placeholder="Pilih Tipe Barang" />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -1324,7 +1328,7 @@ export default function CreateReportPage() {
                     <Input
                       id={`reason-${row.id}`}
                       className="w-full min-w-0"
-                      placeholder="Contoh: Beli TB XMAX 40 tapi isi Vario 32"
+                      placeholder="Alasan klaim ..."
                       value={row.reason}
                       onChange={(e) => updateClaimRow(row.id, { reason: e.target.value })}
                     />
@@ -1945,16 +1949,6 @@ export default function CreateReportPage() {
             <ArrowLeft className="size-4" /> Kembali
           </Button>
           <div className="flex gap-2">
-            {step > 0 && !isLastStep && (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleSaveDraft}
-                className="gap-1.5"
-              >
-                <Check className="size-4" /> Simpan Draft
-              </Button>
-            )}
             <Button
               type="button"
               onClick={handleNext}

@@ -11,7 +11,7 @@ import { InputOTP, InputOTPGroup, InputOTPSeparator, InputOTPSlot } from '@/comp
 import { ModeToggle } from '@/components/shared/ModeToggle';
 import { toast } from 'sonner';
 import { authServiceClient } from '@/lib/api/auth-service';
-import { brthubApi, deriveRoles, resolveRoleRedirect } from '@/lib/api/brthub-api';
+import { brthubApi, deriveRoles, resolveRoleRedirect, roleFromRedirect } from '@/lib/api/brthub-api';
 import { useAuth, type AuthUser } from '@/lib/auth/auth-context';
 
 function OtpForm() {
@@ -54,10 +54,13 @@ function OtpForm() {
   }, []);
 
   // ─── Staff login: verify OTP → fetch me from be-brthub → set AuthContext → redirect by role
-  const handleStaffLogin = async (accessToken: string) => {
+  const handleStaffLogin = async (accessToken: string, refreshToken: string) => {
     let meData;
     try {
-      meData = await brthubApi.getMe(accessToken);
+      // Token eksplisit: saat ini belum (dan tidak boleh) tersimpan di
+      // localStorage sebelum profil berhasil diambil. skipAuthRefresh agar 401
+      // tidak memicu redirect otomatis dari fetch-wrapper saat masih di /otp.
+      meData = await brthubApi.getMe(accessToken, { skipAuthRefresh: true });
     } catch {
       throw new Error('Gagal mengambil profil pengguna. Pastikan Anda memiliki akun karyawan BRTHub.');
     }
@@ -83,9 +86,6 @@ function OtpForm() {
       employee_profile: meData.brthub?.employee_profile ?? null,
     };
 
-    // Simpan ke AuthContext + localStorage
-    login(accessToken, '', authUser);
-
     // Role aktif = role yang terakhir dipakai user (bila masih dimiliki),
     // supaya user multi-role tidak selalu dipaksa ke role tertentu.
     let preferredRole: string | null = null;
@@ -96,6 +96,10 @@ function OtpForm() {
     }
 
     const destination = resolveRoleRedirect(roles, preferredRole);
+    // Simpan ke AuthContext + localStorage (refresh token dipakai oleh
+    // fetch-wrapper untuk memperbarui access token saat kedaluwarsa),
+    // sekaligus sinkronkan badge dengan halaman tujuan.
+    login(accessToken, refreshToken, authUser, roleFromRedirect(destination));
     toast.success(`Login berhasil! Selamat datang, ${meData.user.full_name}.`);
     router.push(destination);
   };
@@ -152,7 +156,7 @@ function OtpForm() {
       }
 
       if (isStaffMode) {
-        await handleStaffLogin(accessToken);
+        await handleStaffLogin(accessToken, result.data?.refresh_token ?? '');
       } else {
         await handleReporterLogin(accessToken, result.data?.expires_in);
       }

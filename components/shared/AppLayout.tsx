@@ -42,6 +42,8 @@ import {
 import { LogOut, Settings, User, Bell, Repeat } from 'lucide-react';
 import { TopbarClock } from '@/components/shared/TopbarClock';
 import { ModeToggle } from '@/components/shared/ModeToggle';
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
+import { defaultRole } from '@/lib/api/brthub-api';
 import { useAuth } from '@/lib/auth/auth-context';
 import { toast } from 'sonner';
 import type { LucideIcon } from 'lucide-react';
@@ -94,19 +96,31 @@ function ProfileDropdown() {
     approver: 'Approver',
     admin: 'Administrator',
   };
-  const primaryRole = activeRole || availableRoles[0] || '';
+  // Satu-satunya fallback memakai urutan prioritas yang sama dengan redirect,
+  // dan hanya bila role tersimpan tidak lagi dimiliki user.
+  const primaryRole =
+    activeRole && availableRoles.includes(activeRole)
+      ? activeRole
+      : defaultRole(availableRoles) ?? '';
   const roleLabel = ROLE_LABELS[primaryRole] || primaryRole;
   const switchableRoles = availableRoles.filter((r) => r !== primaryRole);
+  const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [loggingOut, setLoggingOut] = React.useState(false);
 
   const handleLogout = async () => {
+    setLoggingOut(true);
     try {
       await logout();
     } catch {
       toast.error('Gagal keluar. Silakan coba lagi.');
+    } finally {
+      setLoggingOut(false);
+      setConfirmOpen(false);
     }
   };
 
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger
         render={<Button variant="ghost" size="icon" className="relative rounded-full hover:bg-transparent" />}
@@ -178,7 +192,7 @@ function ProfileDropdown() {
             variant="destructive"
             onClick={(e) => {
               e.preventDefault();
-              handleLogout();
+              setConfirmOpen(true);
             }}
           >
             <LogOut />
@@ -187,6 +201,17 @@ function ProfileDropdown() {
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
+    <ConfirmDialog
+      open={confirmOpen}
+      onOpenChange={setConfirmOpen}
+      variant="destructive"
+      title="Keluar dari BRTHub?"
+      description="Sesi kerja Anda akan diakhiri. Anda perlu login kembali untuk mengakses dashboard."
+      confirmLabel="Ya, Keluar"
+      loading={loggingOut}
+      onConfirm={handleLogout}
+    />
+    </>
   );
 }
 

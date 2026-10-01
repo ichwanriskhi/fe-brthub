@@ -1,4 +1,11 @@
-const AUTH_SERVICE_URL = process.env.NEXT_PUBLIC_AUTH_SERVICE_URL || 'http://localhost:8001';
+const AUTH_SERVICE_URL = process.env.NEXT_PUBLIC_AUTH_SERVICE_URL || 'http://localhost:8000';
+
+/**
+ * Client ID yang mengidentifikasi BRTHub ke Auth Service.
+ * Nilai ini publik (bukan secret) dan aman diekspos di frontend.
+ * Harus cocok dengan `client_id` di tabel `apps` di Auth Service.
+ */
+const AUTH_CLIENT_ID = process.env.NEXT_PUBLIC_AUTH_CLIENT_ID || 'brthub_web';
 
 export interface AuthServiceOtpRequest {
   identifier: string;
@@ -21,6 +28,38 @@ export interface AuthServiceResponse<T> {
 
 export const authServiceClient = {
   /**
+   * Konsumsi link setup/reset password: simpan password baru via token sekali pakai.
+   * Link email berisi `token` + `user_id` sebagai query params.
+   */
+  async setPassword(
+    token: string,
+    userId: string,
+    password: string,
+    passwordConfirmation: string
+  ): Promise<AuthServiceResponse<{ message?: string }>> {
+    const response = await fetch(`${AUTH_SERVICE_URL}/api/auth/set-password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        token,
+        user_id: userId,
+        password,
+        password_confirmation: passwordConfirmation,
+      }),
+    });
+
+    const body = await response.json().catch(() => ({ message: 'Network error' }));
+
+    if (!response.ok || !body.success) {
+      throw new Error(body.message || 'Gagal menyimpan password');
+    }
+
+    return body;
+  },
+
+  /**
    * Password-based login (email or phone number + password).
    *
    * Identifier bisa email atau nomor handphone; backend membedakan keduanya
@@ -28,15 +67,15 @@ export const authServiceClient = {
    */
   async loginWithPassword(
     identifier: string,
-    password: string,
-    appId?: string
+    password: string
   ): Promise<AuthServiceResponse<{ access_token: string; refresh_token: string; token_type: string; expires_in: number; user?: any }>> {
     const response = await fetch(`${AUTH_SERVICE_URL}/api/auth/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ identifier, password, app_id: appId ?? null }),
+      // app_id wajib disertakan agar Auth Service memvalidasi client dan mengikat sesi ke BRTHub
+      body: JSON.stringify({ identifier, password, app_id: AUTH_CLIENT_ID }),
     });
 
     if (!response.ok) {
@@ -61,8 +100,8 @@ export const authServiceClient = {
       : `${AUTH_SERVICE_URL}/api/auth/otp/request`;
 
     const body = isEmail
-      ? { email: identifier, action }
-      : { phone_number: identifier, action };
+      ? { email: identifier, action, app_id: AUTH_CLIENT_ID }
+      : { phone_number: identifier, action, app_id: AUTH_CLIENT_ID };
 
     const response = await fetch(url, {
       method: 'POST',
@@ -94,8 +133,8 @@ export const authServiceClient = {
       : `${AUTH_SERVICE_URL}/api/auth/otp/verify`;
 
     const body = isEmail
-      ? { email: identifier, otp: otpCode, action }
-      : { phone_number: identifier, otp: otpCode, action };
+      ? { email: identifier, otp: otpCode, action, app_id: AUTH_CLIENT_ID }
+      : { phone_number: identifier, otp: otpCode, action, app_id: AUTH_CLIENT_ID };
 
     const response = await fetch(url, {
       method: 'POST',

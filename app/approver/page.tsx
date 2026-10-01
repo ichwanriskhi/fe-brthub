@@ -121,6 +121,7 @@ export default function ApproverDashboardPage() {
                   <TableHead className="bg-muted/50 px-6 py-3">Tahap</TableHead>
                   <TableHead className="bg-muted/50 px-6 py-3">Tipe</TableHead>
                   <TableHead className="bg-muted/50 px-6 py-3">Status</TableHead>
+                  <TableHead className="bg-muted/50 px-6 py-3 text-right">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -136,13 +137,12 @@ export default function ApproverDashboardPage() {
                         {ticket.id}
                       </TableCell>
                       <TableCell className="px-6 py-3">
-                        <Link
-                          href={href}
-                          className="max-w-[280px] truncate text-sm font-medium hover:underline"
-                          title={ticket.subject}
-                        >
-                          {ticket.subject}
-                        </Link>
+                        <div className="max-w-[280px] space-y-0.5">
+                          <p className="truncate text-sm font-medium" title={ticket.subject}>
+                            {ticket.subject}
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground">SO: {ticket.soNumber ?? '-'}</p>
+                        </div>
                       </TableCell>
                       <TableCell className="px-6 py-3">
                         <span className="text-xs font-medium text-muted-foreground">
@@ -154,6 +154,14 @@ export default function ApproverDashboardPage() {
                       </TableCell>
                       <TableCell className="px-6 py-3">
                         <StatusBadge status={ticket.status} />
+                      </TableCell>
+                      <TableCell className="px-6 py-3 text-right">
+                        <Button size="sm" asChild className="gap-1 text-xs">
+                          <Link href={href}>
+                            Tinjau
+                            <ArrowUpRight className="size-3.5" />
+                          </Link>
+                        </Button>
                       </TableCell>
                     </TableRow>
                   );

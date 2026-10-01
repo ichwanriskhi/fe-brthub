@@ -11,7 +11,7 @@ import { ModeToggle } from '@/components/shared/ModeToggle';
 import { ArrowLeft, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 import { authServiceClient } from '@/lib/api/auth-service';
-import { brthubApi, deriveRoles, resolveRoleRedirect } from '@/lib/api/brthub-api';
+import { brthubApi, deriveRoles, resolveRoleRedirect, roleFromRedirect } from '@/lib/api/brthub-api';
 import { useAuth } from '@/lib/auth/auth-context';
 import type { AuthUser } from '@/lib/auth/auth-context';
 
@@ -34,7 +34,7 @@ export default function LoginPage() {
     setIsLoading(true);
     try {
       // 1. Login via Auth Service (email atau nomor HP + password)
-      const loginResp = await authServiceClient.loginWithPassword(identifier, password, BRTHUB_APP_ID);
+      const loginResp = await authServiceClient.loginWithPassword(identifier, password);
 
       const accessToken = loginResp.data?.access_token;
       const refreshToken = loginResp.data?.refresh_token;
@@ -42,8 +42,10 @@ export default function LoginPage() {
         throw new Error(loginResp.message || 'Email/nomor atau password salah.');
       }
 
-      // 2. Ambil profil + roles dari be-brthub
-      const meData = await brthubApi.getMe(accessToken);
+      // 2. Ambil profil + roles dari be-brthub (token eksplisit: localStorage
+      //    belum diisi sebelum profil berhasil; skipAuthRefresh agar 401 tidak
+      //    memicu clear-session + redirect saat kita masih di halaman login)
+      const meData = await brthubApi.getMe(accessToken, { skipAuthRefresh: true });
 
       if (!meData.success) {
         throw new Error('Akun tidak ditemukan di BRTHub. Hubungi admin untuk pendaftaran akun.');
@@ -66,10 +68,11 @@ export default function LoginPage() {
         employee_profile: meData.brthub?.employee_profile ?? null,
       };
 
-      // Simpan via AuthContext (konsisten dengan OTP flow)
-      login(accessToken, refreshToken, authUser);
-
+      // Simpan via AuthContext (konsisten dengan OTP flow),
+      // sekaligus sinkronkan badge dengan halaman tujuan.
       const destination = resolveRoleRedirect(roles, null);
+      login(accessToken, refreshToken, authUser, roleFromRedirect(destination));
+
       toast.success(`Login berhasil! Selamat datang, ${meData.user.full_name}.`);
       router.push(destination);
     } catch (error: unknown) {

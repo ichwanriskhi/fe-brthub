@@ -17,8 +17,8 @@ import {
   eachYearOfInterval,
 } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
-import { MOCK_TICKETS } from '@/lib/mock/data';
-import { MOCK_CATEGORIES } from '@/lib/mock/admin';
+import type { Ticket } from '@/lib/types/ticket';
+import type { RawCategory } from '@/lib/api/master';
 import {
   Bar,
   BarChart,
@@ -54,11 +54,6 @@ const CHART_COLORS = [
   'oklch(0.78 0.13 30)',      // oranye
   'oklch(0.5 0.18 160)',      // teal gelap
 ];
-
-const COLOR_MAP: Record<string, string> = {};
-MOCK_CATEGORIES.forEach((c, i) => {
-  COLOR_MAP[c.id] = CHART_COLORS[i % CHART_COLORS.length];
-});
 
 /* ── Utils ────────────────────────────────────────── */
 type RangeKey = '7d' | '30d' | '90d' | '6m' | '1y';
@@ -151,15 +146,28 @@ function ChartTooltip({ active, payload, label }: {
 }
 
 /* ── CategoryTrendChart ───────────────────────────── */
-export function CategoryTrendChart() {
+export interface CategoryTrendChartProps {
+  /** Tiket riil (datanya terpaginasi — mis. 200 terbaru), bukan mock. */
+  tickets: Ticket[];
+  /** Master kategori (`getMasterDataAll()`) untuk nama & warna legend. */
+  categories: RawCategory[];
+}
+
+export function CategoryTrendChart({ tickets: allTickets, categories }: CategoryTrendChartProps) {
   const [range, setRange]   = React.useState<RangeKey>('90d');
   const [agg, setAgg]       = React.useState<AggKey>('week');
 
   const now       = new Date();
   const startDate = getStartDate(range);
 
+  // warna stabil per kategori (urut master data)
+  const colorMap: Record<string, string> = {};
+  categories.forEach((c, i) => {
+    colorMap[c.id] = CHART_COLORS[i % CHART_COLORS.length];
+  });
+
   // filter tiket dalam range
-  const tickets = MOCK_TICKETS.filter(t => {
+  const tickets = allTickets.filter(t => {
     const d = new Date(t.createdAt);
     return d >= startDate && d <= now;
   });
@@ -188,8 +196,8 @@ export function CategoryTrendChart() {
   const totalTickets = tickets.length;
   const catTotals = catIds.map(id => ({
     id,
-    name: MOCK_CATEGORIES.find(c => c.id === id)?.name ?? id,
-    color: COLOR_MAP[id] ?? CHART_COLORS[0],
+    name: categories.find(c => c.id === id)?.name ?? id,
+    color: colorMap[id] ?? CHART_COLORS[0],
     total: tickets.filter(t => t.categoryId === id).length,
   })).sort((a, b) => b.total - a.total);
 
@@ -256,9 +264,9 @@ export function CategoryTrendChart() {
                   <Bar
                     key={catId}
                     dataKey={catId}
-                    name={MOCK_CATEGORIES.find(c => c.id === catId)?.name ?? catId}
+                    name={categories.find(c => c.id === catId)?.name ?? catId}
                     stackId="a"
-                    fill={COLOR_MAP[catId] ?? CHART_COLORS[0]}
+                    fill={colorMap[catId] ?? CHART_COLORS[0]}
                     radius={0}
                   />
                 ))}

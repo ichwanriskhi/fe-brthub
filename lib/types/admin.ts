@@ -77,6 +77,8 @@ export interface EmployeeEntry {
   /** Semua role aplikasi yang dimiliki user. */
   roles: AppRole[];
   accountStatus: AccountStatus;
+  /** True bila akun sudah punya password di Auth Service. Null = tidak diketahui. */
+  hasPassword: boolean | null;
   /** True bila admin sudah kirim link setup/reset password */
   activationLinkSent: boolean;
   hiredAt: string;

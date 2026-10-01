@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getAdminEmployees, createAdminEmployee, updateAdminEmployee, appRolesToDbNames, type EmployeeProfile } from '@/lib/api/admin-employees';
+import { getAdminEmployees, createAdminEmployee, updateAdminEmployee, sendSetupPasswordLink, sendResetPasswordLink, appRolesToDbNames, type EmployeeProfile } from '@/lib/api/admin-employees';
 import { getMasterDataAll } from '@/lib/api/master';
 import type { EmployeeEntry, AccountStatus, AppRole } from '@/lib/types/admin';
 import { APP_ROLES, ASSIGNABLE_APP_ROLES } from '@/lib/types/admin';
@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from '@/components/ui/pagination';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Field, FieldLabel } from '@/components/ui/field';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -67,6 +68,7 @@ function toEntry(e: EmployeeProfile): EmployeeEntry {
     role: (roles[0] ?? 'STAFF') as AppRole,
     roles: roles as AppRole[],
     accountStatus: e.user?.is_active ? 'ACTIVE' : 'NOT_ACTIVATED',
+    hasPassword: e.hasPassword ?? null,
     activationLinkSent: false,
     hiredAt: e.created_at,
   };
@@ -223,8 +225,19 @@ export default function AdminPegawaiPage() {
         await updateAdminEmployee(editing.id, payload);
         toast.success('Data pegawai berhasil diubah.');
       } else {
-        await createAdminEmployee(payload);
-        toast.success('Pegawai baru berhasil ditambahkan.');
+        const created = await createAdminEmployee(payload);
+        // Default: langsung kirim link setup password via email.
+        // Pegawai tetap tersimpan bila pengiriman gagal (warning, tanpa rollback).
+        try {
+          await sendSetupPasswordLink(created.user_id, 'email');
+          toast.success('Pegawai baru ditambahkan & link setup dikirim ke email.');
+        } catch (linkError) {
+          toast.warning(
+            `Pegawai tersimpan, tetapi link setup gagal dikirim: ${
+              linkError instanceof Error ? linkError.message : 'unknown error'
+            }. Kirim ulang lewat ikon amplop.`,
+          );
+        }
       }
       setDialogOpen(false);
       await loadEmployees();
@@ -235,41 +248,85 @@ export default function AdminPegawaiPage() {
     }
   };
 
-  const sendSetupLink = (emp: EmployeeEntry) => {
-    toast.success(`Link setup password dikirim ke ${emp.name} (${emp.email ?? emp.phone})`);
+  const [pendingLink, setPendingLink] = useState<string | null>(null);
+
+  const sendSetupLink = async (emp: EmployeeEntry, channel: 'email' = 'email') => {
+    const key = `${emp.userId}:setup`;
+    if (pendingLink) return;
+    setPendingLink(key);
+    try {
+      await toast.promise(sendSetupPasswordLink(emp.userId, channel), {
+        loading: `Mengirim link setup ke ${emp.name}…`,
+        success:
+          channel === 'email'
+            ? `Link setup password dikirim ke email ${emp.name}`
+            : `Link setup password dibuat untuk ${emp.name} (${emp.email ?? emp.phone})`,
+        error: (err) => (err instanceof Error ? err.message : 'Gagal mengirim link setup password.'),
+      });
+    } finally {
+      setPendingLink((current) => (current === key ? null : current));
+    }
   };
 
-  const sendResetLink = (emp: EmployeeEntry) => {
-    toast.success(`Link reset password dikirim ke ${emp.name}`);
+  const sendResetLink = async (emp: EmployeeEntry, channel: 'email' = 'email') => {
+    const key = `${emp.userId}:reset`;
+    if (pendingLink) return;
+    setPendingLink(key);
+    try {
+      await toast.promise(sendResetPasswordLink(emp.userId, channel), {
+        loading: `Mengirim link reset ke ${emp.name}…`,
+        success:
+          channel === 'email'
+            ? `Link reset password dikirim ke email ${emp.name}`
+            : `Link reset password dibuat untuk ${emp.name}`,
+        error: (err) => (err instanceof Error ? err.message : 'Gagal mengirim link reset password.'),
+      });
+    } finally {
+      setPendingLink((current) => (current === key ? null : current));
+    }
   };
 
   const actionButtons = (e: EmployeeEntry, sm = false) => (
     <>
-      {e.accountStatus === 'NOT_ACTIVATED' && (
-        <Button
-          variant={sm ? 'outline' : 'ghost'}
-          size={sm ? 'sm' : 'icon'}
-          onClick={() => sendSetupLink(e)}
-          aria-label="Kirim link setup password"
-          title="Kirim link setup password"
-          className={sm ? 'h-7 gap-1.5 text-xs' : ''}
-        >
-          <MailCheck className="size-3.5" />
-          {sm && 'Setup'}
-        </Button>
-      )}
-      {e.accountStatus === 'ACTIVE' && (
-        <Button
-          variant={sm ? 'outline' : 'ghost'}
-          size={sm ? 'sm' : 'icon'}
-          onClick={() => sendResetLink(e)}
-          aria-label="Kirim link reset password"
-          title="Kirim link reset password"
-          className={sm ? 'h-7 gap-1.5 text-xs' : ''}
-        >
-          <KeyRound className="size-3.5" />
-          {sm && 'Reset'}
-        </Button>
+      {/* Belum ber-password (atau status tak diketahui) → setup; sudah → reset. */}
+      {e.hasPassword === true ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant={sm ? 'outline' : 'ghost'}
+                size={sm ? 'sm' : 'icon'}
+                onClick={() => sendResetLink(e)}
+                disabled={pendingLink === `${e.userId}:reset`}
+                aria-label="Kirim link reset password"
+                className={sm ? 'h-7 gap-1.5 text-xs' : ''}
+              >
+                <KeyRound className="size-3.5" />
+                {sm && (pendingLink === `${e.userId}:reset` ? 'Mengirim…' : 'Reset')}
+              </Button>
+            }
+          />
+          <TooltipContent>Kirim link reset password</TooltipContent>
+        </Tooltip>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant={sm ? 'outline' : 'ghost'}
+                size={sm ? 'sm' : 'icon'}
+                onClick={() => sendSetupLink(e)}
+                disabled={pendingLink === `${e.userId}:setup`}
+                aria-label="Kirim link setup password"
+                className={sm ? 'h-7 gap-1.5 text-xs' : ''}
+              >
+                <MailCheck className="size-3.5" />
+                {sm && (pendingLink === `${e.userId}:setup` ? 'Mengirim…' : 'Setup')}
+              </Button>
+            }
+          />
+          <TooltipContent>Kirim link setup password</TooltipContent>
+        </Tooltip>
       )}
       <Button
         variant={sm ? 'outline' : 'ghost'}
@@ -508,7 +565,7 @@ export default function AdminPegawaiPage() {
             <Field>
               <FieldLabel>Departemen</FieldLabel>
               <Select
-                value={departmentId || undefined}
+                value={departmentId || null}
                 onValueChange={(v) => {
                   setDepartmentId(v ?? '');
                   setPositionId('');
@@ -530,7 +587,7 @@ export default function AdminPegawaiPage() {
             <Field>
               <FieldLabel>Posisi</FieldLabel>
               <Select
-                value={positionId || undefined}
+                value={positionId || null}
                 onValueChange={(v) => setPositionId(v ?? '')}
                 items={positions
                   .filter((p) => p.isActive && (!departmentId || !p.departmentId || p.departmentId === departmentId))

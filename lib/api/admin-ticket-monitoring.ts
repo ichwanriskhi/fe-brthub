@@ -6,12 +6,19 @@
 import { toHandlerTicket } from '@/lib/api/handler';
 import { toTicket } from '@/lib/api/tickets';
 import type { Ticket } from '@/lib/types/ticket';
+import { authenticatedFetch } from './fetch-wrapper';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 
 export interface AdminTicketMonitoringParams {
   search?: string;
   status?: 'OPEN' | 'PENDING_APPROVAL' | 'IN_PROGRESS' | 'PENDING_REVIEW' | 'REWORK_REQUIRED';
+  /**
+   * Gabungkan beberapa status non-terminal dalam satu request
+   * (`status_codes[]=…`) — mis. OPEN + REWORK_REQUIRED untuk "Perlu Perhatian".
+   * Diabaikan bila `status` di-set (mutually exclusive).
+   */
+  statuses?: Array<'OPEN' | 'PENDING_APPROVAL' | 'IN_PROGRESS' | 'PENDING_REVIEW' | 'REWORK_REQUIRED'>;
   priority?: 'A' | 'B' | 'C';
   ticketType?: 'REQUEST' | 'INCIDENT' | 'COMPLAINT' | 'INQUIRY';
   categoryId?: string;
@@ -36,13 +43,10 @@ function getAuthToken(): string | null {
 }
 
 async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getAuthToken();
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await authenticatedFetch(path, {
     ...init,
     headers: {
       Accept: 'application/json',
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers || {}),
     },
   });
@@ -65,6 +69,9 @@ export async function getAdminTicketMonitoring(
   const searchParams = new URLSearchParams();
   if (params.search) searchParams.set('search', params.search);
   if (params.status) searchParams.set('status_code', params.status);
+  if (params.statuses && params.statuses.length > 0 && !params.status) {
+    params.statuses.forEach((code) => searchParams.append('status_codes[]', code));
+  }
   if (params.priority) searchParams.set('priority_code', params.priority);
   if (params.ticketType) searchParams.set('ticket_type_code', params.ticketType);
   if (params.categoryId) searchParams.set('category_id', params.categoryId);
@@ -75,7 +82,7 @@ export async function getAdminTicketMonitoring(
   if (params.page) searchParams.set('page', String(params.page));
 
   // Default untuk monitoring: semua status non-terminal
-  if (!params.status) {
+  if (!params.status && !(params.statuses && params.statuses.length > 0)) {
     searchParams.append('status_codes[]', 'OPEN');
     searchParams.append('status_codes[]', 'PENDING_APPROVAL');
     searchParams.append('status_codes[]', 'IN_PROGRESS');
@@ -96,12 +103,9 @@ export async function getAdminTicketMonitoring(
 }
 
 export async function getAdminTicketDetail(id: string): Promise<Ticket> {
-  const token = getAuthToken();
-  const res = await fetch(`${API_URL}/api/auth/tickets/${encodeURIComponent(id)}`, {
+  const res = await authenticatedFetch(`/api/auth/tickets/${encodeURIComponent(id)}`, {
     headers: {
       Accept: 'application/json',
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
 

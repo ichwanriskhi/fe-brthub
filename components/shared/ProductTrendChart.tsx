@@ -16,8 +16,8 @@ import {
   eachYearOfInterval,
 } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
-import { MOCK_TICKETS } from '@/lib/mock/data';
-import { MOCK_PRODUCTS } from '@/lib/mock/admin';
+import type { Ticket } from '@/lib/types/ticket';
+import type { RawProduct } from '@/lib/api/master';
 import {
   Bar,
   BarChart,
@@ -53,11 +53,6 @@ const CHART_COLORS = [
   'oklch(0.78 0.13 30)',      // oranye
   'oklch(0.5 0.18 160)',      // teal gelap
 ];
-
-const COLOR_MAP: Record<string, string> = {};
-MOCK_PRODUCTS.forEach((p, i) => {
-  COLOR_MAP[p.id] = CHART_COLORS[i % CHART_COLORS.length];
-});
 
 /* ── Utils ────────────────────────────────────────── */
 type RangeKey = '7d' | '30d' | '90d' | '6m' | '1y';
@@ -146,14 +141,27 @@ function ChartTooltip({ active, payload, label }: {
 }
 
 /* ── ProductTrendChart ────────────────────────────── */
-export function ProductTrendChart() {
+export interface ProductTrendChartProps {
+  /** Tiket riil (datanya terpaginasi — mis. 200 terbaru), bukan mock. */
+  tickets: Ticket[];
+  /** Master produk (`getMasterDataAll()`) untuk nama & warna legend. */
+  products: RawProduct[];
+}
+
+export function ProductTrendChart({ tickets: allTickets, products }: ProductTrendChartProps) {
   const [range, setRange] = React.useState<RangeKey>('90d');
   const [agg, setAgg]     = React.useState<AggKey>('month');
 
   const now       = new Date();
   const startDate = getStartDate(range);
 
-  const tickets = MOCK_TICKETS.filter(t => {
+  // warna stabil per produk (urut master data)
+  const colorMap: Record<string, string> = {};
+  products.forEach((p, i) => {
+    colorMap[p.id] = CHART_COLORS[i % CHART_COLORS.length];
+  });
+
+  const tickets = allTickets.filter(t => {
     const d = new Date(t.createdAt);
     return d >= startDate && d <= now && !!t.productId;
   });
@@ -178,12 +186,12 @@ export function ProductTrendChart() {
 
   const totalTickets = tickets.length;
   const prodTotals = prodIds.map(id => {
-    const prod = MOCK_PRODUCTS.find(p => p.id === id);
+    const prod = products.find(p => p.id === id);
     return {
       id,
-      name: prod?.name ?? prod?.productCode ?? id,
-      code: prod?.productCode ?? id,
-      color: COLOR_MAP[id] ?? CHART_COLORS[0],
+      name: prod?.name ?? prod?.code ?? id,
+      code: products.find(p => p.id === id)?.code ?? id,
+      color: colorMap[id] ?? CHART_COLORS[0],
       total: tickets.filter(t => t.productId === id).length,
     };
   }).sort((a, b) => b.total - a.total);
@@ -248,14 +256,14 @@ export function ProductTrendChart() {
                 />
                 <Tooltip content={<ChartTooltip />} cursor={{ fill: 'var(--muted)', opacity: 0.5 }} />
                 {prodIds.map(prodId => {
-                  const prod = MOCK_PRODUCTS.find(p => p.id === prodId);
+                  const prod = products.find(p => p.id === prodId);
                   return (
                     <Bar
                       key={prodId}
                       dataKey={prodId}
-                      name={prod?.name ?? prod?.productCode ?? prodId}
+                      name={prod?.name ?? prod?.code ?? prodId}
                       stackId="a"
-                      fill={COLOR_MAP[prodId] ?? CHART_COLORS[0]}
+                      fill={colorMap[prodId] ?? CHART_COLORS[0]}
                       radius={0}
                     />
                   );

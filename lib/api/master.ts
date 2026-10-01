@@ -5,6 +5,8 @@
  * `auth.authservice` (bearer token dari Auth Service), kecuali disebut lain.
  */
 
+import { authenticatedFetch } from './fetch-wrapper';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 
 async function authToken(): Promise<string> {
@@ -99,8 +101,8 @@ export interface MasterDataAll {
  */
 export async function getMasterDataAll(): Promise<MasterDataAll> {
   const token = await authToken();
-  const response = await fetch(`${API_URL}/api/master/all?include_inactive=1`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  const response = await authenticatedFetch(`/api/master/all?include_inactive=1`, {
+    headers: { Accept: 'application/json' },
   });
   const payload: unknown = await response.json().catch(() => null);
 

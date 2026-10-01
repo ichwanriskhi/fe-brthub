@@ -1,5 +1,6 @@
 import { toTicket } from '@/lib/api/tickets';
 import type { Ticket, TicketAttachment } from '@/lib/types/ticket';
+import { authenticatedFetch } from './fetch-wrapper';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 
@@ -167,9 +168,9 @@ export async function getHandlerTickets(
   page = 1,
 ): Promise<HandlerListResult> {
   const token = await authToken();
-  const response = await fetch(
-    `${API_URL}/api/auth/handler/tickets?status=${status}&page=${page}`,
-    { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
+  const response = await authenticatedFetch(
+    `/api/auth/handler/tickets?status=${status}&page=${page}`,
+    { headers: { Accept: 'application/json' } },
   );
   const payload: unknown = await response.json().catch(() => null);
 
@@ -188,9 +189,9 @@ export async function getHandlerTickets(
 /** Detail tiket handler (data lengkap + progres + resolusi). */
 export async function getHandlerTicket(ticketId: string): Promise<Ticket> {
   const token = await authToken();
-  const response = await fetch(
-    `${API_URL}/api/auth/handler/tickets/${encodeURIComponent(ticketId)}`,
-    { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
+  const response = await authenticatedFetch(
+    `/api/auth/handler/tickets/${encodeURIComponent(ticketId)}`,
+    { headers: { Accept: 'application/json' } },
   );
   const payload: unknown = await response.json().catch(() => null);
 
@@ -217,11 +218,11 @@ export async function submitHandlerProgress(
   form.append('note', note);
   attachments.forEach((file) => form.append('attachments[]', file));
 
-  const response = await fetch(
-    `${API_URL}/api/auth/handler/tickets/${encodeURIComponent(ticketId)}/progress`,
+  const response = await authenticatedFetch(
+    `/api/auth/handler/tickets/${encodeURIComponent(ticketId)}/progress`,
     {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      headers: { Accept: 'application/json' },
       body: form,
     },
   );
@@ -247,11 +248,11 @@ export async function submitHandlerResolution(
   form.append('detail', payload.detail);
   attachments.forEach((file) => form.append('attachments[]', file));
 
-  const response = await fetch(
-    `${API_URL}/api/auth/handler/tickets/${encodeURIComponent(ticketId)}/resolution`,
+  const response = await authenticatedFetch(
+    `/api/auth/handler/tickets/${encodeURIComponent(ticketId)}/resolution`,
     {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      headers: { Accept: 'application/json' },
       body: form,
     },
   );
@@ -312,9 +313,9 @@ export async function getUnitEmployees(
 /** Antrean tiket unit (IN_PROGRESS, sudah diterima departemen ini). */
 export async function getUnitTickets(page = 1): Promise<HandlerListResult> {
   const token = await authToken();
-  const response = await fetch(
-    `${API_URL}/api/auth/unit/tickets?page=${page}`,
-    { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
+  const response = await authenticatedFetch(
+    `/api/auth/unit/tickets?page=${page}`,
+    { headers: { Accept: 'application/json' } },
   );
   const payload: unknown = await response.json().catch(() => null);
 
@@ -333,9 +334,9 @@ export async function getUnitTickets(page = 1): Promise<HandlerListResult> {
  */
 export async function getUnitTicket(ticketId: string): Promise<Ticket> {
   const token = await authToken();
-  const response = await fetch(
-    `${API_URL}/api/auth/unit/tickets/${encodeURIComponent(ticketId)}`,
-    { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
+  const response = await authenticatedFetch(
+    `/api/auth/unit/tickets/${encodeURIComponent(ticketId)}`,
+    { headers: { Accept: 'application/json' } },
   );
   const payload: unknown = await response.json().catch(() => null);
 
@@ -352,9 +353,9 @@ export async function getUnitTicket(ticketId: string): Promise<Ticket> {
  */
 export async function getUnitHistory(page = 1): Promise<HandlerListResult> {
   const token = await authToken();
-  const response = await fetch(
-    `${API_URL}/api/auth/unit/tickets/history?page=${page}`,
-    { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
+  const response = await authenticatedFetch(
+    `/api/auth/unit/tickets/history?page=${page}`,
+    { headers: { Accept: 'application/json' } },
   );
   const payload: unknown = await response.json().catch(() => null);
 
@@ -374,11 +375,11 @@ export async function assignHandler(
   employeeId: string,
 ): Promise<void> {
   const token = await authToken();
-  const response = await fetch(
-    `${API_URL}/api/auth/unit/tickets/${encodeURIComponent(ticketId)}/assign-handler`,
+  const response = await authenticatedFetch(
+    `/api/auth/unit/tickets/${encodeURIComponent(ticketId)}/assign-handler`,
     {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json' },
+      headers: { Accept: 'application/json' },
       body: JSON.stringify({ employee_id: employeeId }),
     },
   );

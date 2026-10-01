@@ -1,5 +1,11 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 
+import {
+  post as authenticatedPost,
+  get as authenticatedGet,
+  type AuthenticatedFetchOptions,
+} from './fetch-wrapper';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ApiResponse<T> {
@@ -115,38 +121,60 @@ export function resolveRoleRedirect(
     const redirect = ROLE_REDIRECT[preferredRole as AppRole];
     if (redirect) return redirect;
   }
+  return roleRedirectByPriority(roles);
+}
+
+/**
+ * Role default dari daftar role (urutan prioritas tetap).
+ * Dipakai sebagai satu-satunya fallback agar badge dan redirect
+ * tidak pernah dihitung dari dua urutan berbeda.
+ */
+export function defaultRole(roles: string[]): AppRole | null {
   for (const r of ROLE_PRIORITY) {
-    if (roles.includes(r)) return ROLE_REDIRECT[r];
+    if (roles.includes(r)) return r;
   }
-  return '/unauthorized';
+  return null;
+}
+
+function roleRedirectByPriority(roles: string[]): string {
+  const role = defaultRole(roles);
+  return role ? ROLE_REDIRECT[role] : '/unauthorized';
+}
+
+/**
+ * Role pemilik sebuah path dashboard (invers ROLE_REDIRECT).
+ * Dipakai saat login agar role aktif = halaman tujuan.
+ */
+export function roleFromRedirect(path: string): AppRole | null {
+  const entry = (Object.entries(ROLE_REDIRECT) as [AppRole, string][]).find(
+    ([, redirectPath]) => redirectPath === path,
+  );
+  return entry ? entry[0] : null;
 }
 
 // ─── API client ───────────────────────────────────────────────────────────────
 
-async function post<T>(path: string, body: unknown, token?: string): Promise<T> {
-  const headers: HeadersInit = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${API_URL}/api${path}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
-  const json = await res.json().catch(() => ({ success: false, message: 'Network error' }));
-  if (!res.ok && res.status !== 422) {
-    throw new Error(json.message || `Request failed (${res.status})`);
-  }
-  return json as T;
+/**
+ * Opsi tambahan yang diteruskan ke fetch-wrapper.
+ * - `token`           → pakai token eksplisit (bootstrap login, token belum di
+ *                       localStorage). Sebelumnya `get()` membuang parameter ini
+ *                       sehingga `/api/auth/me` terkirim tanpa header Authorization
+ *                       dan selalu dijawab 401 oleh be-brthub.
+ * - `skipAuthRefresh` → jangan refresh/redirect otomatis saat 401.
+ */
+type AuthOptions = Pick<AuthenticatedFetchOptions, 'token' | 'skipAuthRefresh'>;
+
+async function post<T>(
+  path: string,
+  body: unknown,
+  token?: string,
+  options: AuthOptions = {},
+): Promise<T> {
+  return authenticatedPost<T>(path, body, { ...options, ...(token ? { token } : {}) });
 }
 
-async function get<T>(path: string, token: string): Promise<T> {
-  const res = await fetch(`${API_URL}/api${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const json = await res.json().catch(() => ({ success: false, message: 'Network error' }));
-  if (!res.ok) {
-    throw new Error(json.message || `Request failed (${res.status})`);
-  }
-  return json as T;
+async function get<T>(path: string, token?: string, options: AuthOptions = {}): Promise<T> {
+  return authenticatedGet<T>(path, { ...options, ...(token ? { token } : {}) });
 }
 
 export const brthubApi = {
@@ -194,15 +222,19 @@ export const brthubApi = {
 
   /**
    * Fetch current authenticated user including BRTHub roles.
+   *
+   * `options.skipAuthRefresh` dipakai pada alur login: token baru belum
+   * tersimpan di localStorage, jadi 401 harus ditangani halaman login (toast),
+   * bukan memicu clear-session + redirect dari fetch-wrapper.
    */
-  async getMe(token: string): Promise<MeResponse> {
-    return get<MeResponse>('/auth/me', token);
+  async getMe(token: string, options: AuthOptions = {}): Promise<MeResponse> {
+    return get<MeResponse>('/auth/me', token, options);
   },
 
   /**
    * Logout — revoke token on the server.
    */
-  async logout(token: string): Promise<void> {
-    await post('/auth/logout', {}, token);
+  async logout(): Promise<void> {
+    await post('/auth/logout', {});
   },
 };

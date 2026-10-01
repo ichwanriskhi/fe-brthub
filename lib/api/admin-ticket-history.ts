@@ -7,6 +7,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 
 import { toTicket } from '@/lib/api/tickets';
 import type { Ticket } from '@/lib/types/ticket';
+import { authenticatedFetch } from './fetch-wrapper';
 
 export interface AdminTicketHistoryParams {
   search?: string;
@@ -36,13 +37,10 @@ function getAuthToken(): string | null {
 }
 
 async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getAuthToken();
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await authenticatedFetch(path, {
     ...init,
     headers: {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      Accept: 'application/json',
       ...(init?.headers || {}),
     },
   });

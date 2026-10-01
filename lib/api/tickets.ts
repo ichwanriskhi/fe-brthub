@@ -10,6 +10,7 @@ import type {
   TicketType,
 } from "@/lib/types/ticket";
 import { workflowLabelFromApi } from "@/lib/constants/reviewer";
+import { authenticatedFetch } from "./fetch-wrapper";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
@@ -193,6 +194,14 @@ export function toTicket(value: unknown): Ticket {
     salesDetailRaw.claimed_items ?? salesDetailRaw.claimedItems ?? item.claimed_items,
   );
   const rawAttachments = Array.isArray(item.attachments) ? item.attachments : [];
+  const rawActivities = Array.isArray(item.activities) ? item.activities.map(record) : [];
+  const activities = rawActivities.map((a) => ({
+    id: string(a.id),
+    activityType: string(a.activity_type, string(a.activityType)),
+    description: string(a.description),
+    actorName: string(record(a.actor).full_name) || undefined,
+    createdAt: string(a.created_at, string(a.createdAt)),
+  }));
 
   // ── Fallback chains for every field ──
   const reporterName =
@@ -319,6 +328,7 @@ export function toTicket(value: unknown): Ticket {
       ? oneOf(firstRelation.relation_type, RELATION_TYPES, "RELATED_TO")
       : item.relationType ? oneOf(item.relationType, RELATION_TYPES, "RELATED_TO") : undefined,
     attachments: rawAttachments.length > 0 ? rawAttachments.map(attachment) : Array.isArray(item.attachments) ? (item.attachments as TicketAttachment[]) : [],
+    activities,
     createdAt: string(item.created_at, string(item.createdAt, new Date(0).toISOString())),
     updatedAt: string(item.updated_at, string(item.updatedAt, string(item.created_at, new Date(0).toISOString()))),
     latestRevision: toRevision(item.latest_revision) ?? (item.latestRevision as Ticket["latestRevision"]),
@@ -438,10 +448,12 @@ function pageInfo(payload: unknown): { lastPage: number } {
 }
 
 async function requestTickets(page: number, token: string): Promise<unknown> {
-  const response = await fetch(
-    `${API_URL}/api/auth/tickets?mine=true&page=${page}`,
+  const response = await authenticatedFetch(
+    `/api/auth/tickets?mine=true&page=${page}`,
     {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      headers: { Accept: "application/json" },
+      // Sesi reporter dipakai eksplisit (lihat reporterToken()).
+      token,
     },
   );
   const payload: unknown = await response.json().catch(() => null);
@@ -459,8 +471,9 @@ async function requestAllTickets(
   page: number,
   token: string,
 ): Promise<unknown> {
-  const response = await fetch(`${API_URL}/api/auth/tickets?page=${page}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  const response = await authenticatedFetch(`/api/auth/tickets?page=${page}`, {
+    headers: { Accept: "application/json" },
+    token,
   });
   const payload: unknown = await response.json().catch(() => null);
 
@@ -482,9 +495,40 @@ async function authToken(): Promise<string> {
   return token;
 }
 
+/**
+ * Token for reporter-only endpoints ("Laporan Saya").
+ *
+ * `/laporan` & `/laporan/[id]` are reporter-only (dijaga `ReporterGuard` +
+ * cookie `brthub_session`), sehingga WAJIB memakai sesi reporter (`auth_token`).
+ * Kalau memakai default fetch-wrapper (`brthub_token` lebih diutamakan), maka di
+ * browser yang juga punya sesi staf endpoint `mine=true` akan memakai identitas
+ * staf — daftar jadi kosong atau menampilkan tiket orang lain.
+ */
+async function reporterToken(): Promise<string> {
+  if (typeof window === "undefined") return "";
+  const token = localStorage.getItem("auth_token");
+  if (!token)
+    throw new Error("Sesi Anda tidak ditemukan. Silakan masuk kembali.");
+  return token;
+}
+
+/**
+ * Token for the ticket-detail endpoint.
+ *
+ * Dipakai lintas role: reporter (`/laporan/[id]`), reviewer
+ * (`/reviewer/tiket/[id]`) dan approver (`ApprovalDetail`). Karena itu defaultnya
+ * adalah sesi apa pun yang tersedia (`brthub_token` staf, fallback `auth_token`
+ * reporter). Halaman reporter yang wajib memakai identitas pelapor memanggil
+ * `getMyTicket(id, { asReporter: true })` supaya di browser dengan dua sesi
+ * (staf + reporter) tidak tertukar identitas.
+ */
+function ticketDetailToken(asReporter: boolean | undefined): Promise<string> {
+  return asReporter ? reporterToken() : authToken();
+}
+
 /** Returns every ticket owned by the currently authenticated reporter. */
 export async function getMyTickets(): Promise<Ticket[]> {
-  const token = await authToken();
+  const token = await reporterToken();
 
   const firstPage = await requestTickets(1, token);
   const { lastPage } = pageInfo(firstPage);
@@ -497,13 +541,22 @@ export async function getMyTickets(): Promise<Ticket[]> {
   return pages.flatMap(responseItems).map(toTicket);
 }
 
-/** Returns one ticket owned by the currently authenticated reporter. */
-export async function getMyTicket(ticketId: string): Promise<Ticket> {
-  const token = await authToken();
-  const response = await fetch(
-    `${API_URL}/api/auth/tickets/${encodeURIComponent(ticketId)}`,
+/**
+ * Returns one ticket. Dipakai reporter, reviewer dan approver — lihat
+ * {@link ticketDetailToken} untuk aturan pemilihan token.
+ *
+ * @param options.asReporter set `true` dari halaman reporter (`/laporan/[id]`).
+ */
+export async function getMyTicket(
+  ticketId: string,
+  options: { asReporter?: boolean } = {},
+): Promise<Ticket> {
+  const token = await ticketDetailToken(options.asReporter);
+  const response = await authenticatedFetch(
+    `/api/auth/tickets/${encodeURIComponent(ticketId)}`,
     {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      headers: { Accept: "application/json" },
+      token,
     },
   );
   const payload: unknown = await response.json().catch(() => null);
@@ -538,10 +591,11 @@ export async function getAllTickets(): Promise<Ticket[]> {
 /** Returns tickets the currently-logged-in reviewer has ever reviewed. */
 export async function getMyReviewedTickets(page: number): Promise<unknown> {
   const token = await authToken();
-  const response = await fetch(
-    `${API_URL}/api/auth/tickets?reviewed_by_me=true&page=${page}`,
+  const response = await authenticatedFetch(
+    `/api/auth/tickets?reviewed_by_me=true&page=${page}`,
     {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      headers: { Accept: "application/json" },
+      token,
     },
   );
   const payload: unknown = await response.json().catch(() => null);
@@ -585,16 +639,15 @@ export async function submitReview(
   },
 ): Promise<void> {
   const token = await authToken();
-  const response = await fetch(
-    `${API_URL}/api/auth/tickets/${encodeURIComponent(ticketId)}/review`,
+  const response = await authenticatedFetch(
+    `/api/auth/tickets/${encodeURIComponent(ticketId)}/review`,
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${token}`,
         Accept: "application/json",
-        "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
+      token,
     },
   );
 
@@ -626,10 +679,11 @@ export async function getApprovals(
   page = 1,
 ): Promise<ApprovalListResult> {
   const token = await authToken();
-  const response = await fetch(
-    `${API_URL}/api/auth/approvals?stage=${stage}&page=${page}`,
+  const response = await authenticatedFetch(
+    `/api/auth/approvals?stage=${stage}&page=${page}`,
     {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      headers: { Accept: "application/json" },
+      token,
     },
   );
   const payload: unknown = await response.json().catch(() => null);
@@ -662,16 +716,15 @@ export async function decideApproval(
   },
 ): Promise<Ticket> {
   const token = await authToken();
-  const response = await fetch(
-    `${API_URL}/api/auth/approvals/${encodeURIComponent(ticketId)}/decide`,
+  const response = await authenticatedFetch(
+    `/api/auth/approvals/${encodeURIComponent(ticketId)}/decide`,
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${token}`,
         Accept: "application/json",
-        "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
+      token,
     },
   );
 

@@ -26,6 +26,6 @@ export function customerDisplayName(ticket: Ticket): string | null {
  * Inisial untuk avatar — memakai nama pelapor (bukan customer).
  */
 export function reporterInitials(ticket: Ticket): string {
-  const name = ticket.reporterName || ticket.customerData?.name || '?';
+  const name = ticket.reporterName || '?';
   return name.slice(0, 2).toUpperCase();
 }

@@ -1,4 +1,5 @@
 import type { TicketChatMessage } from '@/lib/types/ticket';
+import { authenticatedFetch } from './fetch-wrapper';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 
@@ -65,10 +66,9 @@ function toChatMessage(value: unknown): TicketChatMessage {
 }
 
 async function request<T>(url: string, options: RequestInit): Promise<T> {
-  const token = await authToken();
-  const response = await fetch(url, {
+  const response = await authenticatedFetch(url, {
     ...options,
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', ...options.headers },
+    headers: { Accept: 'application/json', ...options.headers },
   });
   const payload: unknown = await response.json().catch(() => null);
 

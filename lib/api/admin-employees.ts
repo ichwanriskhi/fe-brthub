@@ -5,6 +5,7 @@
  */
 
 import { ASSIGNABLE_APP_ROLES, type AppRole } from '@/lib/types/admin';
+import { authenticatedFetch } from './fetch-wrapper';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 
@@ -54,6 +55,8 @@ export interface EmployeeProfile {
     /** Nama role di DB (admin/reviewer/handler/unit). */
     roles: string[];
   } | null;
+  /** Kepemilikan password di Auth Service. Null = tidak diketahui (IdP tak terjangkau). */
+  hasPassword: boolean | null;
   department: {
     id: string;
     code: string;
@@ -130,6 +133,7 @@ function mapEmployee(e: Record<string, unknown>): EmployeeProfile {
       : null,
     role: appRoles[0] ?? 'STAFF',
     roles: appRoles,
+    hasPassword: typeof e.has_password === 'boolean' ? e.has_password : null,
     department: e.department
       ? {
           id: string(record(e.department).id),
@@ -149,13 +153,10 @@ function mapEmployee(e: Record<string, unknown>): EmployeeProfile {
 }
 
 async function adminRequest(path: string, init?: RequestInit): Promise<unknown> {
-  const token = await authToken();
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await authenticatedFetch(path, {
     ...init,
     headers: {
-      Authorization: `Bearer ${token}`,
       Accept: 'application/json',
-      'Content-Type': 'application/json',
       ...(init?.headers ?? {}),
     },
   });
@@ -227,4 +228,20 @@ export async function updateAdminEmployee(
     body: JSON.stringify(payload),
   });
   return mapEmployee(record(body));
+}
+
+/** Kirim link setup password. POST /api/admin/users/{userId}/setup-password-link */
+export async function sendSetupPasswordLink(userId: string, channel?: 'email'): Promise<void> {
+  await adminRequest(`/api/admin/users/${userId}/setup-password-link`, {
+    method: 'POST',
+    body: JSON.stringify(channel ? { channel } : {}),
+  });
+}
+
+/** Kirim link reset password. POST /api/admin/users/{userId}/reset-password-link */
+export async function sendResetPasswordLink(userId: string, channel?: 'email'): Promise<void> {
+  await adminRequest(`/api/admin/users/${userId}/reset-password-link`, {
+    method: 'POST',
+    body: JSON.stringify(channel ? { channel } : {}),
+  });
 }

@@ -1,144 +1,223 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import type { ColumnVisibilityState } from '@tanstack/react-table';
 import Link from 'next/link';
 import { StatusBadge, TypeBadge } from '@/components/shared/StatusBadge';
 import { StatisticsCard } from '@/components/shared/StatisticsCard';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { DataTable, createColumnHelper, type ColumnDef } from '@/components/shared/DataTable';
+import type { DataTableFeatures } from '@/components/shared/data-table-features';
+import { TableSkeleton } from '@/components/shared/TableSkeleton';
+import { ColumnToggle } from '@/components/shared/ColumnToggle';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Inbox, Clock, Send, XCircle, ArrowUpRight, RefreshCw } from 'lucide-react';
-import { authenticatedFetch } from '@/lib/api/fetch-wrapper';
-import { toTicket } from '@/lib/api/tickets';
-import type { Ticket } from '@/lib/types/ticket';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  ArrowUpRight,
+  CircleCheckBig,
+  Clock,
+  Inbox,
+  RefreshCw,
+  Send,
+  Timer,
+  XCircle,
+} from 'lucide-react';
+import {
+  getReviewerSummary,
+  toTicketStatus,
+  toTicketType,
+  type ReviewerSummary,
+  type ReviewerSummaryTicket,
+} from '@/lib/api/reviewer-dashboard';
+import { cn } from '@/lib/utils';
 
-const ATTENTION_LIMIT = 5;
-const ACTIVITY_LIMIT = 5;
-const OPEN_SAMPLE_SIZE = 100;
+const LIST_LIMIT = 5;
 
-interface TicketsPage {
-  data: Ticket[];
-  total: number;
+/** Format durasi jam jadi satuan yang enak dibaca. */
+function formatHours(hours: number): string {
+  if (hours < 24) return `${Math.round(hours)} jam`;
+  return `${(hours / 24).toFixed(1).replace('.', ',')} hari`;
 }
 
-function record(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
+const columnHelper = createColumnHelper<DataTableFeatures, ReviewerSummaryTicket>();
 
-/**
- * Satu halaman tiket dengan filter apa pun — hanya `total` dan item
- * ter-parse yang dipakai. `per_page=1` untuk angka KPI (murah).
- */
-async function fetchTicketsPage(params: Record<string, string>): Promise<TicketsPage> {
-  const searchParams = new URLSearchParams(params);
-  const res = await authenticatedFetch(`/api/auth/tickets?${searchParams.toString()}`, {
-    headers: { Accept: 'application/json' },
-  });
-  const payload: unknown = await res.json().catch(() => null);
-  if (!res.ok) {
-    const msg =
-      typeof record(payload).message === 'string' && record(payload).message
-        ? String(record(payload).message)
-        : 'Gagal memuat tiket dari server.';
-    throw new Error(msg);
-  }
-  const body = record(payload);
-  const items = Array.isArray(body.data) ? body.data : [];
-  return {
-    data: items.map(toTicket),
-    total: typeof body.total === 'number' ? body.total : items.length,
-  };
-}
+const attentionColumns: ColumnDef<DataTableFeatures, ReviewerSummaryTicket>[] =
+  columnHelper.columns([
+    columnHelper.accessor('ticket_no', {
+      header: 'ID Tiket',
+      cell: ({ row }) => (
+        <span className="font-mono text-xs whitespace-nowrap">{row.original.ticket_no}</span>
+      ),
+    }),
+    columnHelper.accessor('subject', {
+      header: 'Subjek',
+      cell: ({ row }) => (
+        <div className="max-w-[240px] space-y-0.5">
+          <p className="truncate text-sm font-medium">{row.original.subject}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            SO: {row.original.so_number ?? '-'}
+          </p>
+        </div>
+      ),
+    }),
+    columnHelper.accessor('reporter_name', {
+      header: 'Pelapor',
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
+          <Avatar className="size-6 shrink-0">
+            <AvatarFallback className="text-[10px]">
+              {row.original.reporter_name.slice(0, 2).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+          <span className="truncate text-sm">{row.original.reporter_name}</span>
+        </div>
+      ),
+    }),
+    columnHelper.display({
+      id: 'tipe',
+      header: 'Tipe',
+      cell: ({ row }) => <TypeBadge ticketType={toTicketType(row.original.ticket_type_code)} />,
+    }),
+    columnHelper.display({
+      id: 'umur',
+      header: 'Umur',
+      cell: ({ row }) => (
+        <span
+          className={cn(
+            'text-sm whitespace-nowrap',
+            row.original.age_days >= 3
+              ? 'font-semibold text-destructive'
+              : 'text-muted-foreground',
+          )}
+        >
+          {row.original.age_days} hari
+        </span>
+      ),
+    }),
+    columnHelper.display({
+      id: 'aksi',
+      header: () => <div className="text-right">Aksi</div>,
+      cell: ({ row }) => (
+        <div className="text-right">
+          <Button size="sm" asChild>
+            <Link href={`/reviewer/tiket/${row.original.ticket_no}`}>
+              Tinjau
+              <ArrowUpRight data-icon="inline-end" />
+            </Link>
+          </Button>
+        </div>
+      ),
+      enableHiding: false,
+    }),
+  ]);
 
-function ageInDays(createdAt: string): number {
-  const time = new Date(createdAt).getTime();
-  if (!Number.isFinite(time)) return 0;
-  return Math.max(0, Math.floor((Date.now() - time) / 86_400_000));
-}
-
-function firstDayOfMonth(): string {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  return `${now.getFullYear()}-${month}-01`;
-}
+const activityColumns: ColumnDef<DataTableFeatures, ReviewerSummaryTicket>[] =
+  columnHelper.columns([
+    columnHelper.accessor('ticket_no', {
+      header: 'ID Tiket',
+      cell: ({ row }) => (
+        <span className="font-mono text-xs whitespace-nowrap">{row.original.ticket_no}</span>
+      ),
+    }),
+    columnHelper.accessor('subject', {
+      header: 'Subjek',
+      cell: ({ row }) => (
+        <p className="max-w-[240px] truncate text-sm font-medium">{row.original.subject}</p>
+      ),
+    }),
+    columnHelper.display({
+      id: 'tipe',
+      header: 'Tipe',
+      cell: ({ row }) => <TypeBadge ticketType={toTicketType(row.original.ticket_type_code)} />,
+    }),
+    columnHelper.display({
+      id: 'status',
+      header: 'Status',
+      cell: ({ row }) => <StatusBadge status={toTicketStatus(row.original.status_code)} />,
+    }),
+    columnHelper.accessor('reviewed_at', {
+      header: 'Ditinjau',
+      cell: ({ row }) => (
+        <span className="text-xs whitespace-nowrap text-muted-foreground">
+          {row.original.reviewed_at
+            ? new Date(row.original.reviewed_at).toLocaleString('id-ID', {
+                day: 'numeric',
+                month: 'short',
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+            : '-'}
+        </span>
+      ),
+    }),
+    columnHelper.display({
+      id: 'aksi',
+      header: () => <div className="text-right">Aksi</div>,
+      cell: ({ row }) => (
+        <div className="text-right">
+          <Button size="sm" asChild>
+            <Link href={`/reviewer/tiket/${row.original.ticket_no}`}>
+              Lihat
+              <ArrowUpRight data-icon="inline-end" />
+            </Link>
+          </Button>
+        </div>
+      ),
+      enableHiding: false,
+    }),
+  ]);
 
 export default function ReviewerDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<ReviewerSummary | null>(null);
   const [retryKey, setRetryKey] = useState(0);
-  const [openCount, setOpenCount] = useState<number | null>(null);
-  const [waitingApproverCount, setWaitingApproverCount] = useState<number | null>(null);
-  const [forwardedCount, setForwardedCount] = useState<number | null>(null);
-  const [rejectedCount, setRejectedCount] = useState<number | null>(null);
-  const [attentionTickets, setAttentionTickets] = useState<Ticket[]>([]);
-  const [myActivity, setMyActivity] = useState<Ticket[]>([]);
+  const [attentionColumnsState, setAttentionColumns] = useState<ColumnVisibilityState>({});
+  const [activityColumnsState, setActivityColumns] = useState<ColumnVisibilityState>({});
 
+  // SetState di dalam async IIFE, bukan langsung di badan effect — itu membuat
+  // `react-hooks/set-state-in-effect` tetap tenang sekaligus memberi
+  // pembatalan supaya state tidak ditulis setelah unmount.
   useEffect(() => {
     let cancelled = false;
+
     (async () => {
       setLoading(true);
       setError(null);
+
       try {
-        const [
-          openRes,
-          waitingRes,
-          forwardedRes,
-          rejectedRes,
-          openSampleRes,
-          activityRes,
-        ] = await Promise.all([
-          fetchTicketsPage({ status_code: 'OPEN', per_page: '1' }),
-          fetchTicketsPage({ reviewed_by_me: 'true', status_code: 'PENDING_APPROVAL', per_page: '1' }),
-          fetchTicketsPage({ reviewed_by_me: 'true', date_from: firstDayOfMonth(), per_page: '1' }),
-          fetchTicketsPage({ reviewed_by_me: 'true', status_code: 'REJECTED', per_page: '1' }),
-          fetchTicketsPage({ status_code: 'OPEN', per_page: String(OPEN_SAMPLE_SIZE) }),
-          fetchTicketsPage({ reviewed_by_me: 'true', per_page: String(ACTIVITY_LIMIT) }),
-        ]);
-        if (cancelled) return;
-        setOpenCount(openRes.total);
-        setWaitingApproverCount(waitingRes.total);
-        setForwardedCount(forwardedRes.total);
-        setRejectedCount(rejectedRes.total);
-        // Backend urut terbaru; OPEN terlama diambil client-side dari sampel.
-        setAttentionTickets(
-          [...openSampleRes.data]
-            .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-            .slice(0, ATTENTION_LIMIT),
-        );
-        setMyActivity(activityRes.data.slice(0, ACTIVITY_LIMIT));
+        const data = await getReviewerSummary();
+        if (!cancelled) setSummary(data);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Gagal memuat dasbor.');
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : 'Gagal memuat dasbor.');
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
+
     return () => {
       cancelled = true;
     };
   }, [retryKey]);
 
-  const fmt = (v: number | null) => (v === null ? '…' : String(v));
-
-  const stats = [
-    { label: 'Tinjauan Awal', value: fmt(openCount), subtitle: 'Laporan menunggu review', icon: Inbox },
-    { label: 'Menunggu Approver', value: fmt(waitingApproverCount), subtitle: 'Terusan saya diproses', icon: Clock },
-    { label: 'Diteruskan Bulan Ini', value: fmt(forwardedCount), subtitle: 'Tiket saya teruskan', icon: Send },
-    { label: 'Ditolak Saya', value: fmt(rejectedCount), subtitle: 'Laporan tidak valid', icon: XCircle },
-  ];
+  const retry = () => setRetryKey((k) => k + 1);
 
   if (error) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
         <p className="text-lg font-semibold">Gagal memuat dasbor</p>
         <p className="text-sm text-muted-foreground">{error}</p>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setRetryKey((k) => k + 1)}
-        >
+        <Button variant="outline" size="sm" onClick={retry}>
           <RefreshCw data-icon="inline-start" />
           Coba lagi
         </Button>
@@ -146,20 +225,122 @@ export default function ReviewerDashboardPage() {
     );
   }
 
+  const kpi = summary?.kpi;
+  const oldest = summary?.oldest_open ?? [];
+  const recent = summary?.recent_reviews ?? [];
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-2 gap-6 xl:grid-cols-4">
-        {stats.map((s) => (
-          <StatisticsCard key={s.label} {...s} />
-        ))}
+      {/* Bento — 6 kolom. Tiga kartu sama-sama `sm:col-span-2` supaya totalnya
+          tepat 6; sebelumnya 2+1+2 menyisakan satu kolom kosong di kanan. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <StatisticsCard
+          icon={Inbox}
+          label="Menunggu Tinjauan"
+          value={kpi ? String(kpi.open) : '…'}
+          subtitle="Antrean tinjauan awal"
+          className="sm:col-span-2"
+        />
+        <StatisticsCard
+          icon={Timer}
+          label="Rata-rata Tinjauan"
+          value={
+            summary?.avg_review_hours !== null && summary?.avg_review_hours !== undefined
+              ? formatHours(summary.avg_review_hours)
+              : '—'
+          }
+          subtitle={
+            summary && summary.review_sample > 0
+              ? `${summary.review_sample} tiket Anda tinjau`
+              : 'Belum ada riwayat tinjauan'
+          }
+          className="sm:col-span-2"
+        />
+        <StatisticsCard
+          icon={Send}
+          label="Ditinjau Bulan Ini"
+          value={kpi ? String(kpi.reviewed_this_month) : '…'}
+          subtitle="Semua keputusan"
+          className="sm:col-span-2"
+        />
       </div>
 
-      <Card className="col-span-full w-full gap-0 overflow-hidden p-0">
-        <CardHeader className="border-b px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <CardTitle>Perlu Tindakan Segera</CardTitle>
-            </div>
+      {/* Baris kedua — 3 KPI + 1 kartu status (total 6 kolom). */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <StatisticsCard
+          icon={Clock}
+          label="Menunggu Approval"
+          value={kpi ? String(kpi.waiting_approval) : '…'}
+          subtitle="Seluruh tiket, bukan milik Anda"
+        />
+        <StatisticsCard
+          icon={Send}
+          label="Diteruskan oleh Anda"
+          value={kpi ? String(kpi.routed_total) : '…'}
+          subtitle="Sepanjang waktu"
+        />
+        <StatisticsCard
+          icon={XCircle}
+          label="Ditolak oleh Anda"
+          value={kpi ? String(kpi.rejected_by_me) : '…'}
+          subtitle="Sepanjang waktu"
+        />
+
+        {/*
+          Status tiket milik Anda. Dulu angka "teruskan" dan "masih menunggu"
+          berdiri sebagai dua kartu terpisah, sehingga hubungannya (subset)
+          tidak terbaca dan keduanya terlihat seperti metrik sebanding.
+          Digabung ke satu kartu supaya jelas: dari N yang Anda teruskan,
+          berapa yang masih macet di approval.
+        */}
+        <Card className="sm:col-span-2 xl:col-span-3">
+          <CardHeader>
+            <CardTitle className="text-base">Status Ticket Anda</CardTitle>
+            <CardDescription>Dari tiket yang Anda teruskan, berapa yang masih diproses</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {loading && !summary ? (
+              <Skeleton className="h-[68px] w-full rounded-lg" />
+            ) : (
+              <div className="grid grid-cols-2 gap-3 text-center">
+                <div className="flex flex-col gap-1">
+                  <span className="text-2xl font-semibold tabular-nums">
+                    {kpi?.routed_total ?? 0}
+                  </span>
+                  <span className="text-xs text-muted-foreground">Diteruskan</span>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span
+                    className={cn(
+                      'text-2xl font-semibold tabular-nums',
+                      (kpi?.forwarded_waiting ?? 0) > 0 ? 'text-amber-600' : 'text-muted-foreground',
+                    )}
+                  >
+                    {kpi?.forwarded_waiting ?? 0}
+                  </span>
+                  <span className="text-xs text-muted-foreground">Masih menunggu</span>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Antrean tertua */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Perlu Tindakan Segera</CardTitle>
+            <CardDescription>
+              {LIST_LIMIT} tiket paling lama menunggu tinjauan
+            </CardDescription>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <ColumnToggle
+              columns={attentionColumns}
+              visibility={attentionColumnsState}
+              onVisibilityChange={setAttentionColumns}
+            />
             <Button variant="outline" size="sm" asChild>
               <Link href="/reviewer/tinjauan-awal">
                 Lihat semua
@@ -168,112 +349,104 @@ export default function ReviewerDashboardPage() {
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="p-0">
-          {loading ? (
-            <p className="p-6 text-sm text-muted-foreground animate-pulse">Memuat antrean…</p>
-          ) : attentionTickets.length === 0 ? (
-            <p className="p-6 text-sm text-muted-foreground">Tidak ada laporan menunggu tinjauan awal.</p>
+        <CardContent>
+          {loading && oldest.length === 0 ? (
+            <TableSkeleton rows={LIST_LIMIT} />
+          ) : oldest.length === 0 ? (
+            <Empty className="border-0 py-12">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <CircleCheckBig />
+                </EmptyMedia>
+                <EmptyTitle>Tidak ada laporan menunggu</EmptyTitle>
+                <EmptyDescription>
+                  Semua laporan sudah ditinjau. Lihat Aktivitas Anda untuk riwayat kerja Anda.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
             <>
-              <div className="md:hidden border-t">
-                {attentionTickets.map((ticket) => (
-                  <div key={ticket.id} className="border-b last:border-0 p-4 space-y-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 space-y-1">
-                        <p className="font-mono text-xs text-muted-foreground">{ticket.id}</p>
-                        <p className="text-sm font-semibold line-clamp-2">{ticket.subject}</p>
-                        <p className="text-xs text-muted-foreground truncate">SO: {ticket.soNumber ?? '-'}</p>
+              <div
+                className={cn(
+                  // Tanpa `px-*`: `CardContent` sudah memberi padding kiri-kanan.
+                  'space-y-3 transition-opacity md:hidden',
+                  loading && 'pointer-events-none opacity-50',
+                )}
+              >
+                {oldest.map((ticket) => (
+                  <div key={ticket.ticket_no} className="rounded-lg border bg-card py-4">
+                    <div className="space-y-2 px-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-0.5">
+                          <p className="font-mono text-xs text-muted-foreground">
+                            {ticket.ticket_no}
+                          </p>
+                          <p className="line-clamp-2 text-sm font-medium leading-snug">
+                            {ticket.subject}
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            SO: {ticket.so_number ?? '-'}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1.5">
+                          <TypeBadge ticketType={toTicketType(ticket.ticket_type_code)} />
+                          <StatusBadge status={toTicketStatus(ticket.status_code)} />
+                        </div>
                       </div>
-                      <div className="flex shrink-0 flex-col items-end gap-1.5">
-                        <TypeBadge ticketType={ticket.ticketType} />
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Avatar className="size-5 shrink-0">
+                          <AvatarFallback className="text-[10px]">
+                            {ticket.reporter_name.slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="truncate">{ticket.reporter_name}</span>
+                        <span className="ml-auto shrink-0">{ticket.age_days} hari</span>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Avatar className="size-5 shrink-0">
-                        <AvatarFallback className="text-[10px]">
-                          {ticket.reporterName.slice(0, 2).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                      <span className="text-xs text-muted-foreground truncate flex-1">
-                        {ticket.reporterName} · {ageInDays(ticket.createdAt)} hari
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <StatusBadge status={ticket.status} />
-                      <Button size="sm" asChild className="h-7 text-xs px-3">
-                        <Link href={`/reviewer/tiket/${ticket.id}`}>Tinjau</Link>
-                      </Button>
+                      <div className="flex justify-end">
+                        <Button size="sm" asChild>
+                          <Link href={`/reviewer/tiket/${ticket.ticket_no}`}>
+                            Tinjau
+                            <ArrowUpRight data-icon="inline-end" />
+                          </Link>
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
 
               <div className="hidden md:block">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="bg-muted/50 px-6 py-3">ID Tiket</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3">Subjek</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3">Pelapor</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3">Tipe</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3">Umur</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3">Status</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3">Aksi</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {attentionTickets.map((ticket) => (
-                      <TableRow key={ticket.id}>
-                        <TableCell className="px-6 py-3 font-mono text-xs whitespace-nowrap">{ticket.id}</TableCell>
-                        <TableCell className="px-6 py-3">
-                          <div className="max-w-[240px] space-y-0.5">
-                            <p className="truncate text-sm font-medium">{ticket.subject}</p>
-                            <p className="truncate text-xs text-muted-foreground">SO: {ticket.soNumber ?? '-'}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="px-6 py-3">
-                          <div className="flex items-center gap-2">
-                            <Avatar className="size-8">
-                              <AvatarFallback className="text-xs">
-                                {ticket.reporterName.slice(0, 2).toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                            <span className="text-sm">{ticket.reporterName}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="px-6 py-3">
-                          <TypeBadge ticketType={ticket.ticketType} />
-                        </TableCell>
-                        <TableCell className="px-6 py-3 text-sm text-muted-foreground whitespace-nowrap">
-                          {ageInDays(ticket.createdAt)} hari
-                        </TableCell>
-                        <TableCell className="px-6 py-3">
-                          <StatusBadge status={ticket.status} />
-                        </TableCell>
-                        <TableCell className="px-6 py-3">
-                          <Button size="sm" asChild className="gap-1 text-xs">
-                            <Link href={`/reviewer/tiket/${ticket.id}`}>
-                              Tinjau
-                              <ArrowUpRight className="size-3.5" />
-                            </Link>
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                <DataTable
+                  columns={attentionColumns}
+                  data={oldest}
+                  isPending={loading}
+                  showRowNumbers
+                  columnVisibility={attentionColumnsState}
+                  onColumnVisibilityChange={setAttentionColumns}
+                  emptyText="Tidak ada laporan menunggu tinjauan awal."
+                  footer={() => null}
+                />
               </div>
             </>
           )}
         </CardContent>
       </Card>
 
-      <Card className="col-span-full w-full gap-0 overflow-hidden p-0">
-        <CardHeader className="border-b px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <CardTitle>Aktivitas Saya</CardTitle>
-            </div>
+      {/* Aktivitas — diurut dari review_logs.reviewed_at, bukan tanggal tiket */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Aktivitas Saya</CardTitle>
+            <CardDescription>
+              {LIST_LIMIT} tiket terakhir yang Anda tinjau
+            </CardDescription>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <ColumnToggle
+              columns={activityColumns}
+              visibility={activityColumnsState}
+              onVisibilityChange={setActivityColumns}
+            />
             <Button variant="outline" size="sm" asChild>
               <Link href="/reviewer/riwayat">
                 Lihat semua
@@ -282,78 +455,71 @@ export default function ReviewerDashboardPage() {
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="p-0">
-          {loading ? (
-            <p className="p-6 text-sm text-muted-foreground animate-pulse">Memuat aktivitas…</p>
-          ) : myActivity.length === 0 ? (
-            <p className="p-6 text-sm text-muted-foreground">Belum ada tiket yang Anda review.</p>
+        <CardContent>
+          {loading && recent.length === 0 ? (
+            <TableSkeleton rows={LIST_LIMIT} />
+          ) : recent.length === 0 ? (
+            <Empty className="border-0 py-12">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Inbox />
+                </EmptyMedia>
+                <EmptyTitle>Belum ada aktivitas</EmptyTitle>
+                <EmptyDescription>Tiket yang Anda tinjau akan tampil di sini.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
-            <div className="hidden md:block">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="bg-muted/50 px-6 py-3">ID Tiket</TableHead>
-                    <TableHead className="bg-muted/50 px-6 py-3">Subjek</TableHead>
-                    <TableHead className="bg-muted/50 px-6 py-3">Pelapor</TableHead>
-                    <TableHead className="bg-muted/50 px-6 py-3">Tipe</TableHead>
-                    <TableHead className="bg-muted/50 px-6 py-3">Status</TableHead>
-                    <TableHead className="bg-muted/50 px-6 py-3">Aksi</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {myActivity.map((ticket) => (
-                    <TableRow key={ticket.id}>
-                      <TableCell className="px-6 py-3 font-mono text-xs whitespace-nowrap">{ticket.id}</TableCell>
-                      <TableCell className="px-6 py-3">
-                        <div className="max-w-[240px] space-y-0.5">
-                          <p className="truncate text-sm font-medium">{ticket.subject}</p>
-                          <p className="truncate text-xs text-muted-foreground">SO: {ticket.soNumber ?? '-'}</p>
+            <>
+              <div
+                className={cn(
+                  // Tanpa `px-*`: `CardContent` sudah memberi padding kiri-kanan.
+                  'space-y-3 transition-opacity md:hidden',
+                  loading && 'pointer-events-none opacity-50',
+                )}
+              >
+                {recent.map((ticket) => (
+                  <div key={ticket.ticket_no} className="rounded-lg border bg-card py-4">
+                    <div className="space-y-2 px-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-0.5">
+                          <p className="font-mono text-xs text-muted-foreground">
+                            {ticket.ticket_no}
+                          </p>
+                          <p className="line-clamp-2 text-sm font-medium leading-snug">
+                            {ticket.subject}
+                          </p>
                         </div>
-                      </TableCell>
-                      <TableCell className="px-6 py-3 text-sm">{ticket.reporterName}</TableCell>
-                      <TableCell className="px-6 py-3">
-                        <TypeBadge ticketType={ticket.ticketType} />
-                      </TableCell>
-                      <TableCell className="px-6 py-3">
-                        <StatusBadge status={ticket.status} />
-                      </TableCell>
-                      <TableCell className="px-6 py-3">
-                        <Button size="sm" variant="outline" asChild className="gap-1 text-xs">
-                          <Link href={`/reviewer/tiket/${ticket.id}`}>
+                        <div className="flex shrink-0 flex-col items-end gap-1.5">
+                          <TypeBadge ticketType={toTicketType(ticket.ticket_type_code)} />
+                          <StatusBadge status={toTicketStatus(ticket.status_code)} />
+                        </div>
+                      </div>
+                      <div className="flex justify-end">
+                        <Button size="sm" asChild>
+                          <Link href={`/reviewer/tiket/${ticket.ticket_no}`}>
                             Lihat
-                            <ArrowUpRight className="size-3.5" />
+                            <ArrowUpRight data-icon="inline-end" />
                           </Link>
                         </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-          {!loading && myActivity.length > 0 && (
-            <div className="md:hidden border-t">
-              {myActivity.map((ticket) => (
-                <div key={ticket.id} className="border-b last:border-0 p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 space-y-1">
-                      <p className="font-mono text-xs text-muted-foreground">{ticket.id}</p>
-                      <p className="text-sm font-semibold line-clamp-2">{ticket.subject}</p>
-                      <p className="text-xs text-muted-foreground truncate">{ticket.reporterName}</p>
-                    </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1.5">
-                      <TypeBadge ticketType={ticket.ticketType} />
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <StatusBadge status={ticket.status} />
-                    <Button variant="outline" size="sm" asChild className="h-7 text-xs">
-                      <Link href={`/reviewer/tiket/${ticket.id}`}>Lihat</Link>
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+
+              <div className="hidden md:block">
+                <DataTable
+                  columns={activityColumns}
+                  data={recent}
+                  isPending={loading}
+                  showRowNumbers
+                  columnVisibility={activityColumnsState}
+                  onColumnVisibilityChange={setActivityColumns}
+                  emptyText="Belum ada tiket yang Anda tinjau."
+                  footer={() => null}
+                />
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

@@ -7,6 +7,7 @@ export default function HandlerHistoryPage() {
     <HandlerQueue
       status="HISTORY"
       hrefBase="/handler/ticket"
+      linkQuery="?from=history"
       actionLabel="Detail"
       emptyTitle="Belum ada riwayat"
       emptyDescription="Tiket yang sudah selesai atau ditolak akan tampil di sini."

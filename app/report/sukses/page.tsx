@@ -4,9 +4,9 @@ import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Loader2 } from 'lucide-react';
 import { SuccessAnimation } from '@/components/shared/SuccessAnimation';
 
 interface TicketData {
@@ -103,7 +103,7 @@ function ReportSuccessContent() {
           <CardContent className="space-y-3 p-4 text-xs">
             {loading ? (
               <div className="flex items-center justify-center py-6 text-muted-foreground">
-                <Loader2 className="mr-2 size-4 animate-spin" />
+                <Spinner className="mr-2" />
                 <span>Memuat data tiket...</span>
               </div>
             ) : (
@@ -138,10 +138,10 @@ function ReportSuccessContent() {
         </Card>
 
         <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:justify-center">
-          <Button asChild variant="outline" className="h-10 text-sm">
+          <Button size="lg" variant="outline" asChild>
             <Link href="/laporan">Lihat Laporan Saya</Link>
           </Button>
-          <Button asChild className="h-10 text-sm">
+          <Button size="lg" asChild>
             <Link href="/report/new">Kirim Laporan Lain</Link>
           </Button>
         </div>
@@ -155,7 +155,7 @@ export default function ReportSuccessPage() {
     <Suspense
       fallback={
         <div className="flex min-h-[50vh] items-center justify-center">
-          <Loader2 className="size-6 animate-spin text-muted-foreground" />
+          <Spinner className="size-6 text-muted-foreground" />
         </div>
       }
     >

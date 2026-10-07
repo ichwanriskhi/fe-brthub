@@ -28,15 +28,30 @@ const ROUTE_LABELS: Record<string, string> = {
   '/unit/riwayat': 'Riwayat Penugasan',
 };
 
-function UnitBreadcrumb({ pathname }: { pathname: string }) {
+/** Asal daftar untuk detail tiket, dibaca dari `?from=`. */
+const UNIT_TICKET_ORIGINS: Record<string, string> = {
+  antrean: '/unit/antrean',
+  riwayat: '/unit/riwayat',
+};
+
+function UnitBreadcrumb({
+  pathname,
+  searchParams,
+}: {
+  pathname: string;
+  searchParams: URLSearchParams;
+}) {
   const segments = pathname.split('/').filter(Boolean);
   const isTicketDetail = segments[1] === 'tiket' && segments.length >= 3;
 
   let crumbs: { href: string; label: string; isLast: boolean }[] = [];
   if (isTicketDetail) {
+    const origin =
+      UNIT_TICKET_ORIGINS[searchParams.get('from') ?? ''] ?? UNIT_TICKET_ORIGINS.antrean;
+
     crumbs = [
       { href: '/unit', label: 'Dashboard', isLast: false },
-      { href: '/unit/antrean', label: 'Antrean Penugasan', isLast: false },
+      { href: origin, label: ROUTE_LABELS[origin], isLast: false },
       { href: pathname, label: 'Detail Penugasan', isLast: true },
     ];
   } else {
@@ -75,7 +90,7 @@ export default function UnitLayout({ children }: { children: React.ReactNode }) 
         routeLabels={ROUTE_LABELS}
         badgeCounts={{}}
         rootHref="/unit"
-        renderBreadcrumb={(p) => <UnitBreadcrumb pathname={p} />}
+        renderBreadcrumb={(p, sp) => <UnitBreadcrumb pathname={p} searchParams={sp} />}
       >
         {children}
       </AppLayout>

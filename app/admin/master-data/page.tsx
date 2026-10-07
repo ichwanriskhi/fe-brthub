@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import type { ColumnVisibilityState } from '@tanstack/react-table';
+import { cn } from '@/lib/utils';
 import {
   getMasterDataAll,
   createMasterData,
@@ -9,7 +11,11 @@ import {
   type RawCategory,
   type RawDepartment,
   type RawPosition,
-  type RawProduct,
+  type RawAction,
+  type RawCategoryAction,
+  type RawPriority,
+  type RawTicketType,
+  type MasterDataCrudType,
 } from '@/lib/api/master';
 import type {
   MasterDataEntry,
@@ -17,22 +23,37 @@ import type {
   CategoryEntry,
   DepartmentEntry,
   PositionEntry,
-  ProductLineEntry,
+  ActionEntry,
+  PriorityEntry,
+  TicketTypeEntry,
 } from '@/lib/types/admin';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { TableToolbar } from '@/components/shared/TableToolbar';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from '@/components/ui/pagination';
+import { DataTable, createColumnHelper, type ColumnDef } from '@/components/shared/DataTable';
+import type { DataTableFeatures } from '@/components/shared/data-table-features';
+import { DataTablePagination } from '@/components/shared/DataTablePagination';
+import { TableSkeleton } from '@/components/shared/TableSkeleton';
+import { ColumnToggle } from '@/components/shared/ColumnToggle';
+import { DotChip } from '@/components/shared/DotChip';
+import { ActiveBadge } from '@/components/shared/StatusBadge';
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field, FieldLabel } from '@/components/ui/field';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { Plus, Pencil, Trash2, CornerDownRight, ExternalLink } from 'lucide-react';
+import { Plus, Pencil, Trash2, ExternalLink, Database, ListChecks } from 'lucide-react';
+import { CategoryActionDialog } from '@/components/shared/CategoryActionDialog';
 import { toast } from 'sonner';
 
 const ITEMS_PER_PAGE = 10;
@@ -81,32 +102,71 @@ function normalizePositions(raw: RawPosition[], deptNameById: Map<string, string
   }));
 }
 
-function normalizeProducts(raw: RawProduct[]): ProductLineEntry[] {
-  return raw.map((p, i) => ({
-    id: p.id,
-    name: p.name,
-    description: p.description ?? undefined,
-    isActive: p.isActive,
-    productCode: p.code,
+function normalizeActions(raw: RawAction[]): ActionEntry[] {
+  return raw.map((a, i) => ({
+    id: a.id,
+    name: a.name,
+    description: a.description ?? undefined,
+    isActive: a.isActive,
+    actionCode: a.code,
     sortOrder: i + 1,
   }));
 }
 
-const TAB_ORDER: MasterDataType[] = ['category', 'department', 'position', 'productLine'];
+function normalizePriorities(raw: RawPriority[]): PriorityEntry[] {
+  return raw.map((p) => ({
+    id: p.id,
+    name: p.name,
+    description: undefined,
+    isActive: p.isActive,
+    priorityCode: p.code,
+    sortOrder: p.sortOrder,
+  }));
+}
+
+function normalizeTicketTypes(raw: RawTicketType[]): TicketTypeEntry[] {
+  return raw.map((t, i) => ({
+    id: t.id,
+    name: t.name,
+    description: undefined,
+    isActive: t.isActive,
+    ticketTypeCode: t.code,
+    sortOrder: i + 1,
+  }));
+}
+
+const TAB_ORDER: MasterDataType[] = [
+  'category',
+  'department',
+  'position',
+  'action',
+  'priority',
+  'ticketType',
+];
 
 const DEFAULT_NAME: Record<MasterDataType, string> = {
   category: 'Kategori',
   department: 'Departemen',
   position: 'Posisi',
-  productLine: 'Lini Produk',
+  action: 'Aksi',
+  priority: 'Prioritas',
+  ticketType: 'Tipe Tiket',
 };
 
 function isCategory(e: MasterDataEntry): e is CategoryEntry {
   return 'parentId' in e;
 }
 
-function isProduct(e: MasterDataEntry): e is ProductLineEntry {
-  return 'productCode' in e;
+function isAction(e: MasterDataEntry): e is ActionEntry {
+  return 'actionCode' in e;
+}
+
+function isPriority(e: MasterDataEntry): e is PriorityEntry {
+  return 'priorityCode' in e;
+}
+
+function isTicketType(e: MasterDataEntry): e is TicketTypeEntry {
+  return 'ticketTypeCode' in e;
 }
 
 function isDepartment(e: MasterDataEntry): e is DepartmentEntry {
@@ -129,18 +189,18 @@ function slugCode(name: string, max = 50): string {
 
 
 function StatusBadgeCell({ entry }: { entry: MasterDataEntry }) {
-  return entry.isActive ? (
-    <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">Aktif</Badge>
-  ) : (
-    <Badge variant="outline" className="text-muted-foreground">Nonaktif</Badge>
-  );
+  return <ActiveBadge isActive={entry.isActive} />;
 }
+
+const columnHelper = createColumnHelper<DataTableFeatures, MasterDataEntry>();
 
 export default function AdminMasterDataPage() {
   const [activeTab, setActiveTab] = useState<MasterDataType>('category');
   const [search, setSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [perPage, setPerPage] = useState(ITEMS_PER_PAGE);
   const [filterValues, setFilterValues] = useState<Record<string, string | null>>({});
+  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>({});
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<MasterDataEntry | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -150,18 +210,27 @@ export default function AdminMasterDataPage() {
   const [categories, setCategories] = useState<CategoryEntry[]>([]);
   const [departments, setDepartments] = useState<DepartmentEntry[]>([]);
   const [positions, setPositions] = useState<PositionEntry[]>([]);
-  const [products, setProducts] = useState<ProductLineEntry[]>([]);
+  const [actions, setActions] = useState<ActionEntry[]>([]);
+  const [priorities, setPriorities] = useState<PriorityEntry[]>([]);
+  const [ticketTypes, setTicketTypes] = useState<TicketTypeEntry[]>([]);
+  // Matriks kategori → aksi — sumber hitungan "dipakai" di tab Aksi/Kategori.
+  const [matrixRows, setMatrixRows] = useState<RawCategoryAction[]>([]);
+  // Dialog matriks per kategori (Opsi A: dari tab Kategori, bukan tab terpisah).
+  const [matrixCategory, setMatrixCategory] = useState<CategoryEntry | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Form state (mock — belum tersimpan)
-    const [formName, setFormName] = useState('');
-    const [formDescription, setFormDescription] = useState('');
-    const [categoryType, setCategoryType] = useState<'main' | 'sub'>('main');
-    const [parentCategoryId, setParentCategoryId] = useState('');
-    const [unitCode, setUnitCode] = useState('');
-    const [hierarchyLevel, setHierarchyLevel] = useState('');
-    const [productCode, setProductCode] = useState('');
-    const [departmentId, setDepartmentId] = useState('');
+  const [formName, setFormName] = useState('');
+  const [formDescription, setFormDescription] = useState('');
+  const [categoryType, setCategoryType] = useState<'main' | 'sub'>('main');
+  const [parentCategoryId, setParentCategoryId] = useState('');
+  const [unitCode, setUnitCode] = useState('');
+  const [hierarchyLevel, setHierarchyLevel] = useState('');
+  const [departmentId, setDepartmentId] = useState('');
+  const [actionCode, setActionCode] = useState('');
+  const [priorityCode, setPriorityCode] = useState('');
+  const [ticketTypeCode, setTicketTypeCode] = useState('');
+  const [sortOrder, setSortOrder] = useState('');
 
   const loadMasterData = async () => {
     setLoading(true);
@@ -172,7 +241,16 @@ export default function AdminMasterDataPage() {
       setCategories(normalizeCategories(data.categories));
       setDepartments(depts);
       setPositions(normalizePositions(data.positions, deptNameById));
-      setProducts(normalizeProducts(data.products));
+      setActions(normalizeActions(data.actions));
+      setPriorities(normalizePriorities(data.priorities));
+      setTicketTypes(normalizeTicketTypes(data.ticketTypes));
+      setMatrixRows(
+        data.categoryActions.map((ca) => ({
+          categoryId: ca.categoryId,
+          actionId: ca.actionId,
+          isRecommended: ca.isRecommended,
+        }))
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Gagal memuat master data.');
     } finally {
@@ -196,7 +274,9 @@ export default function AdminMasterDataPage() {
     { tab: 'category', label: 'Kategori', entries: categories },
     { tab: 'department', label: 'Departemen', entries: departments },
     { tab: 'position', label: 'Posisi', entries: positions },
-    { tab: 'productLine', label: 'Lini Produk', entries: products },
+    { tab: 'action', label: 'Aksi', entries: actions },
+    { tab: 'priority', label: 'Prioritas', entries: priorities },
+    { tab: 'ticketType', label: 'Tipe Tiket', entries: ticketTypes },
   ];
 
   const config = configs.find((c) => c.tab === activeTab) ?? configs[0];
@@ -205,132 +285,114 @@ export default function AdminMasterDataPage() {
   const parentCategoryOptions = topLevelCategories.filter((c) => !editing || c.id !== editing.id);
 
   const parentCategoryName = (entry: MasterDataEntry): string | undefined => {
-      if (isCategory(entry) && entry.parentId) {
-        return categories.find((c) => c.id === entry.parentId)?.name;
-      }
-      return undefined;
-    };
-
-    // Filter configs per tab
-    const getFiltersForTab = (tab: MasterDataType) => {
-      switch (tab) {
-        case 'category':
-          return [
-            {
-              key: 'isActive',
-              label: 'Status',
-              options: [
-                { value: 'true', label: 'Aktif' },
-                { value: 'false', label: 'Nonaktif' },
-              ],
-            },
-            {
-              key: 'parentCategory',
-              label: 'Kategori Induk',
-              options: topLevelCategories.map((c) => ({ value: c.id, label: c.name })),
-            },
-          ];
-        case 'department':
-          return [
-            {
-              key: 'isActive',
-              label: 'Status',
-              options: [
-                { value: 'true', label: 'Aktif' },
-                { value: 'false', label: 'Nonaktif' },
-              ],
-            },
-          ];
-        case 'position':
-          return [
-            {
-              key: 'isActive',
-              label: 'Status',
-              options: [
-                { value: 'true', label: 'Aktif' },
-                { value: 'false', label: 'Nonaktif' },
-              ],
-            },
-            {
-              key: 'department',
-              label: 'Departemen',
-              options: departments.map((d) => ({ value: d.id, label: d.name })),
-            },
-          ];
-        case 'productLine':
-          return [
-            {
-              key: 'isActive',
-              label: 'Status',
-              options: [
-                { value: 'true', label: 'Aktif' },
-                { value: 'false', label: 'Nonaktif' },
-              ],
-            },
-          ];
-        default:
-          return [];
-      }
-    };
-
-    const filteredEntries = config.entries.filter((e) => {
-      if (search.trim() && 
-        !e.name.toLowerCase().includes(search.toLowerCase()) && 
-        !(e.description ?? '').toLowerCase().includes(search.toLowerCase()) &&
-        !(isProduct(e) && e.productCode.toLowerCase().includes(search.toLowerCase()))
-      ) {
-        return false;
-      }
-      // Apply filters
-      const isActiveFilter = filterValues.isActive;
-      if (isActiveFilter !== null && isActiveFilter !== undefined) {
-        if (e.isActive !== (isActiveFilter === 'true')) return false;
-      }
-      if (activeTab === 'category') {
-        const parentFilter = filterValues.parentCategory;
-        if (parentFilter && isCategory(e) && e.parentId !== parentFilter) return false;
-      }
-      if (activeTab === 'position') {
-              const deptFilter = filterValues.department;
-              if (deptFilter && 'departmentId' in e && e.departmentId !== deptFilter) return false;
-            }
-      return true;
-    });
-
-  const totalPages = Math.max(1, Math.ceil(filteredEntries.length / ITEMS_PER_PAGE));
-  const safePage = Math.min(currentPage, totalPages);
-  const entries = filteredEntries.slice((safePage - 1) * ITEMS_PER_PAGE, safePage * ITEMS_PER_PAGE);
-
-  const getPaginationItems = () => {
-    const items: (number | 'ellipsis')[] = [];
-    const total = totalPages;
-    const current = safePage;
-    if (total <= 5) {
-      for (let i = 1; i <= total; i++) items.push(i);
-    } else if (current <= 3) {
-      items.push(1, 2, 3, 'ellipsis', total);
-    } else if (current >= total - 2) {
-      items.push(1, 'ellipsis', total - 2, total - 1, total);
-    } else {
-      items.push(1, 'ellipsis', current - 1, current, current + 1, 'ellipsis', total);
+    if (isCategory(entry) && entry.parentId) {
+      return categories.find((c) => c.id === entry.parentId)?.name;
     }
-    return items;
+    return undefined;
   };
+
+  // Filter configs per tab
+  const getFiltersForTab = (tab: MasterDataType) => {
+    switch (tab) {
+      case 'category':
+        return [
+          {
+            key: 'isActive',
+            label: 'Status',
+            options: [
+              { value: 'true', label: 'Aktif' },
+              { value: 'false', label: 'Nonaktif' },
+            ],
+          },
+          {
+            key: 'parentCategory',
+            label: 'Kategori Induk',
+            options: topLevelCategories.map((c) => ({ value: c.id, label: c.name })),
+          },
+        ];
+      case 'department':
+      case 'action':
+      case 'priority':
+      case 'ticketType':
+        return [
+          {
+            key: 'isActive',
+            label: 'Status',
+            options: [
+              { value: 'true', label: 'Aktif' },
+              { value: 'false', label: 'Nonaktif' },
+            ],
+          },
+        ];
+      case 'position':
+        return [
+          {
+            key: 'isActive',
+            label: 'Status',
+            options: [
+              { value: 'true', label: 'Aktif' },
+              { value: 'false', label: 'Nonaktif' },
+            ],
+          },
+          {
+            key: 'department',
+            label: 'Departemen',
+            options: departments.map((d) => ({ value: d.id, label: d.name })),
+          },
+        ];
+      default:
+        return [];
+    }
+  };
+
+  const filteredEntries = config.entries.filter((e) => {
+    if (
+      search.trim() &&
+      !e.name.toLowerCase().includes(search.toLowerCase()) &&
+      !(e.description ?? '').toLowerCase().includes(search.toLowerCase()) &&
+      !(isAction(e) && e.actionCode.toLowerCase().includes(search.toLowerCase())) &&
+      !(isPriority(e) && e.priorityCode.toLowerCase().includes(search.toLowerCase())) &&
+      !(isTicketType(e) && e.ticketTypeCode.toLowerCase().includes(search.toLowerCase()))
+    ) {
+      return false;
+    }
+    // Apply filters
+    const isActiveFilter = filterValues.isActive;
+    if (isActiveFilter !== null && isActiveFilter !== undefined) {
+      if (e.isActive !== (isActiveFilter === 'true')) return false;
+    }
+    if (activeTab === 'category') {
+      const parentFilter = filterValues.parentCategory;
+      if (parentFilter && isCategory(e) && e.parentId !== parentFilter) return false;
+    }
+    if (activeTab === 'position') {
+      const deptFilter = filterValues.department;
+      if (deptFilter && 'departmentId' in e && e.departmentId !== deptFilter) return false;
+    }
+    return true;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filteredEntries.length / perPage));
+  const safePage = Math.min(currentPage, totalPages);
+  const entries = filteredEntries.slice((safePage - 1) * perPage, safePage * perPage);
 
   const goToPage = (p: number) => setCurrentPage(Math.min(Math.max(1, p), totalPages));
 
   const openAdd = () => {
-      setEditing(null);
-      setFormName('');
-      setFormDescription('');
-      setCategoryType('main');
-      setParentCategoryId('');
-      setUnitCode('');
-      setHierarchyLevel('');
-      setProductCode('');
-      setDepartmentId('');
-      setDialogOpen(true);
-    };
+    setEditing(null);
+    setFormName('');
+    setFormDescription('');
+    setCategoryType('main');
+    setParentCategoryId('');
+    setUnitCode('');
+    setHierarchyLevel('');
+    setDepartmentId('');
+    setActionCode('');
+    setPriorityCode('');
+    setTicketTypeCode('');
+    setSortOrder('');
+    setDialogOpen(true);
+  };
 
   const openEdit = (entry: MasterDataEntry) => {
     setEditing(entry);
@@ -340,14 +402,22 @@ export default function AdminMasterDataPage() {
     setParentCategoryId('');
     setUnitCode('');
     setHierarchyLevel('');
-    setProductCode('');
     setDepartmentId('');
+    setActionCode('');
+    setPriorityCode('');
+    setTicketTypeCode('');
+    setSortOrder('');
 
     if (isCategory(entry)) {
       setCategoryType(entry.parentId ? 'sub' : 'main');
       setParentCategoryId(entry.parentId ?? '');
     }
-    if (isProduct(entry)) setProductCode(entry.productCode);
+    if (isAction(entry)) setActionCode(entry.actionCode);
+    if (isPriority(entry)) {
+      setPriorityCode(entry.priorityCode);
+      setSortOrder(String(entry.sortOrder));
+    }
+    if (isTicketType(entry)) setTicketTypeCode(entry.ticketTypeCode);
     if (isDepartment(entry)) setUnitCode(entry.unitCode);
     if (isPosition(entry)) {
       setDepartmentId(entry.departmentId ?? '');
@@ -357,153 +427,347 @@ export default function AdminMasterDataPage() {
   };
 
   const openDelete = (entry: MasterDataEntry) => {
-      setDeleteTarget(entry);
-      setConfirmOpen(true);
+    setDeleteTarget(entry);
+    setConfirmOpen(true);
+  };
+
+  // ─── Save handler (create or update) ─────────────────────────────────────
+  const handleSave = async () => {
+    if (!formName.trim()) {
+      toast.error('Nama wajib diisi.');
+      return;
+    }
+
+    const typeMap: Record<MasterDataType, MasterDataCrudType> = {
+      category: 'category',
+      department: 'department',
+      position: 'position',
+      action: 'action',
+      priority: 'priority',
+      ticketType: 'ticket_type',
+    };
+    const apiType = typeMap[activeTab];
+
+    const payload: {
+      name: string;
+      code: string;
+      isActive: boolean;
+      description?: string | null;
+      parentCategoryId?: string | null;
+      sortOrder?: number;
+      departmentId?: string;
+      hierarchyLevel?: number;
+    } = {
+      name: formName.trim(),
+      code: '',
+      isActive: editing ? editing.isActive : true,
     };
 
-    // ─── Save handler (create or update) ─────────────────────────────────────
-    const handleSave = async () => {
-      if (!formName.trim()) {
-        toast.error('Nama wajib diisi.');
-        return;
+    if (activeTab === 'category') {
+      const existing = editing && isCategory(editing) ? editing.code : '';
+      payload.code = existing || slugCode(formName.trim(), 100);
+      payload.description = formDescription.trim() || null;
+      payload.parentCategoryId = categoryType === 'sub' ? parentCategoryId : null;
+    } else if (activeTab === 'department') {
+      payload.code = unitCode.trim().toUpperCase();
+      payload.description = formDescription.trim() || null;
+      payload.sortOrder = editing && isDepartment(editing) ? editing.sortOrder : 1;
+    } else if (activeTab === 'position') {
+      const existing = editing && isPosition(editing) ? editing.code : '';
+      payload.code = existing || slugCode(formName.trim(), 50);
+      payload.departmentId = departmentId;
+      payload.hierarchyLevel = parseInt(hierarchyLevel, 10) || 0;
+    } else if (activeTab === 'action') {
+      // `code` immutable setelah create (identitas `resolveActionId` reviewer) -
+      // saat ubah, pakai code yang sudah ada dan kunci inputnya.
+      const existing = editing && isAction(editing) ? editing.actionCode : '';
+      payload.code = existing || actionCode.trim().toUpperCase();
+      payload.description = formDescription.trim() || null;
+    } else if (activeTab === 'priority') {
+      // `code` immutable — dipakai sebagai key filter, badge, dan resolve.
+      const existing = editing && isPriority(editing) ? editing.priorityCode : '';
+      payload.code = existing || priorityCode.trim().toUpperCase();
+      if (sortOrder.trim()) {
+        payload.sortOrder = parseInt(sortOrder, 10) || 0;
+      } else if (editing && isPriority(editing)) {
+        payload.sortOrder = editing.sortOrder;
+      } else {
+        // Baris baru ditaruh paling bawah, bukan menyalip ke urutan 0.
+        payload.sortOrder = priorities.reduce((m, p) => Math.max(m, p.sortOrder), 0) + 1;
       }
+    } else if (activeTab === 'ticketType') {
+      const existing = editing && isTicketType(editing) ? editing.ticketTypeCode : '';
+      payload.code = existing || ticketTypeCode.trim().toUpperCase();
+    }
 
-      const typeMap: Record<MasterDataType, 'category' | 'department' | 'position' | 'product'> = {
-        category: 'category',
-        department: 'department',
-        position: 'position',
-        productLine: 'product',
-      };
-      const apiType = typeMap[activeTab];
+    // For position, we need department - skip if not selected
+    if (activeTab === 'position' && !departmentId) {
+      toast.error('Pilih departemen untuk posisi.');
+      return;
+    }
+    if (activeTab === 'department' && !unitCode.trim()) {
+      toast.error('Kode unit wajib diisi.');
+      return;
+    }
+    if (activeTab === 'category' && categoryType === 'sub' && !parentCategoryId) {
+      toast.error('Pilih kategori induk untuk sub kategori.');
+      return;
+    }
+    if (activeTab === 'action' && !editing && !actionCode.trim()) {
+      toast.error('Kode aksi wajib diisi.');
+      return;
+    }
+    if (activeTab === 'priority' && !editing && !priorityCode.trim()) {
+      toast.error('Kode prioritas wajib diisi.');
+      return;
+    }
+    if (activeTab === 'ticketType' && !editing && !ticketTypeCode.trim()) {
+      toast.error('Kode tipe wajib diisi.');
+      return;
+    }
 
-      const payload: {
-        name: string;
-        code: string;
-        isActive: boolean;
-        description?: string | null;
-        parentCategoryId?: string | null;
-        sortOrder?: number;
-        departmentId?: string;
-        hierarchyLevel?: number;
-      } = {
-        name: formName.trim(),
-        code: '',
-        isActive: editing ? editing.isActive : true,
-      };
+    try {
+      setLoading(true);
+      if (editing) {
+        await updateMasterData(apiType, editing.id, payload);
+        toast.success(`${title} berhasil diubah.`);
+      } else {
+        await createMasterData(apiType, payload);
+        toast.success(`${title} berhasil ditambahkan.`);
+      }
+      setDialogOpen(false);
+      await loadMasterData();
+    } catch (error: unknown) {
+      const err = error as { status?: number; errors?: Record<string, string[]>; message?: string };
+      if (err.status === 422 && err.errors) {
+        const firstError = Object.values(err.errors).flat()[0];
+        toast.error(firstError || 'Validasi gagal.');
+      } else {
+        toast.error(err.message || 'Operasi gagal.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      if (activeTab === 'category') {
-        const existing = editing && isCategory(editing) ? editing.code : '';
-        payload.code = existing || slugCode(formName.trim(), 100);
-        payload.description = formDescription.trim() || null;
-        payload.parentCategoryId = categoryType === 'sub' ? parentCategoryId : null;
-      } else if (activeTab === 'department') {
-        payload.code = unitCode.trim().toUpperCase();
-        payload.description = formDescription.trim() || null;
-        payload.sortOrder = editing && isDepartment(editing) ? editing.sortOrder : 1;
-      } else if (activeTab === 'position') {
-        const existing = editing && isPosition(editing) ? editing.code : '';
-        payload.code = existing || slugCode(formName.trim(), 50);
-        payload.departmentId = departmentId;
-        payload.hierarchyLevel = parseInt(hierarchyLevel, 10) || 0;
-      } else if (activeTab === 'productLine') {
-        payload.code = productCode.trim().toUpperCase();
-        payload.description = formDescription.trim() || null;
-      }
+  // ─── Delete handler ──────────────────────────────────────────────────────
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
 
-      // For position, we need department - skip if not selected
-            if (activeTab === 'position' && !departmentId) {
-              toast.error('Pilih departemen untuk posisi.');
-              return;
-            }
-            if (activeTab === 'productLine' && !productCode.trim()) {
-        toast.error('Kode produk wajib diisi.');
-        return;
-      }
-      if (activeTab === 'department' && !unitCode.trim()) {
-        toast.error('Kode unit wajib diisi.');
-        return;
-      }
-      if (activeTab === 'category' && categoryType === 'sub' && !parentCategoryId) {
-        toast.error('Pilih kategori induk untuk sub kategori.');
-        return;
-      }
-
-      try {
-        setLoading(true);
-        if (editing) {
-          await updateMasterData(apiType, editing.id, payload);
-          toast.success(`${title} berhasil diubah.`);
-        } else {
-          await createMasterData(apiType, payload);
-          toast.success(`${title} berhasil ditambahkan.`);
-        }
-        setDialogOpen(false);
-        await loadMasterData();
-      } catch (error: unknown) {
-        const err = error as { status?: number; errors?: Record<string, string[]>; message?: string };
-        if (err.status === 422 && err.errors) {
-          const firstError = Object.values(err.errors).flat()[0];
-          toast.error(firstError || 'Validasi gagal.');
-        } else {
-          toast.error(err.message || 'Operasi gagal.');
-        }
-      } finally {
-        setLoading(false);
-      }
+    const typeMap: Record<MasterDataType, MasterDataCrudType> = {
+      category: 'category',
+      department: 'department',
+      position: 'position',
+      action: 'action',
+      priority: 'priority',
+      ticketType: 'ticket_type',
     };
+    const apiType = typeMap[activeTab];
 
-    // ─── Delete handler ──────────────────────────────────────────────────────
-    const handleDelete = async () => {
-      if (!deleteTarget) return;
-
-      const typeMap: Record<MasterDataType, 'category' | 'department' | 'position' | 'product'> = {
-        category: 'category',
-        department: 'department',
-        position: 'position',
-        productLine: 'product',
-      };
-      const apiType = typeMap[activeTab];
-
-      try {
-        setLoading(true);
-        await deleteMasterData(apiType, deleteTarget.id);
-        toast.success(`${title} berhasil dihapus.`);
-        setConfirmOpen(false);
-        setDeleteTarget(null);
-        await loadMasterData();
-      } catch (error: unknown) {
-        const err = error as { status?: number; message?: string };
-        if (err.status === 409) {
-          toast.error(err.message || 'Data tidak dapat dihapus karena sedang digunakan.');
-        } else {
-          toast.error(err.message || 'Gagal menghapus data.');
-        }
-      } finally {
-        setLoading(false);
+    try {
+      setLoading(true);
+      await deleteMasterData(apiType, deleteTarget.id);
+      toast.success(`${title} berhasil dihapus.`);
+      setConfirmOpen(false);
+      setDeleteTarget(null);
+      await loadMasterData();
+    } catch (error: unknown) {
+      const err = error as { status?: number; message?: string };
+      if (err.status === 409) {
+        toast.error(err.message || 'Data tidak dapat dihapus karena sedang digunakan.');
+      } else {
+        toast.error(err.message || 'Gagal menghapus data.');
       }
-    };
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const renderDetailCell = (entry: MasterDataEntry) => {
     switch (activeTab) {
       case 'category': {
         const parent = parentCategoryName(entry);
+        // Parent kosong = kategori utama — sel dikosongkan, bukan diisi teks.
+        // Teks "Kategori utama" diulang di setiap baris tanpa menambah info.
         return parent ? (
-          <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
-            <CornerDownRight className="size-3.5" />
-            Sub dari {parent}
-          </span>
-        ) : (
-          <span className="text-sm text-muted-foreground">Kategori utama</span>
-        );
+          <DotChip title={`Sub dari ${parent}`}>{parent}</DotChip>
+        ) : null;
       }
       case 'department':
         return <span className="font-mono text-xs text-muted-foreground">{(entry as DepartmentEntry).unitCode}</span>;
       case 'position':
         return <span className="font-mono text-xs text-muted-foreground">Level {(entry as PositionEntry).hierarchyLevel}</span>;
+      case 'priority':
+        return (
+          <span className="font-mono text-xs text-muted-foreground">
+            Urutan {isPriority(entry) ? entry.sortOrder : '-'}
+          </span>
+        );
       default:
         return <span className="text-sm text-muted-foreground">{entry.description ?? '-'}</span>;
     }
   };
+
+  const detailHeader =
+    activeTab === 'category'
+      ? 'Parent'
+      : activeTab === 'department'
+        ? 'Kode Unit'
+        : activeTab === 'position'
+          ? 'Level'
+          : activeTab === 'priority'
+            ? 'Urutan'
+            : 'Deskripsi';
+
+  const showReportColumn = activeTab === 'category';
+  const reportParam = 'category';
+
+  const columns: ColumnDef<DataTableFeatures, MasterDataEntry>[] = columnHelper.columns([
+    ...(activeTab === 'priority'
+      ? [
+          columnHelper.accessor(
+            (row) => (isPriority(row) ? row.priorityCode : '-'),
+            {
+              id: 'priorityCode',
+              header: 'Kode',
+              cell: ({ row }) => (
+                <span className="font-mono text-xs">
+                  {isPriority(row.original) ? row.original.priorityCode : '-'}
+                </span>
+              ),
+            },
+          ),
+        ]
+      : []),
+    ...(activeTab === 'ticketType'
+      ? [
+          columnHelper.accessor(
+            (row) => (isTicketType(row) ? row.ticketTypeCode : '-'),
+            {
+              id: 'ticketTypeCode',
+              header: 'Kode',
+              cell: ({ row }) => (
+                <span className="font-mono text-xs">
+                  {isTicketType(row.original) ? row.original.ticketTypeCode : '-'}
+                </span>
+              ),
+            },
+          ),
+        ]
+      : []),
+    ...(activeTab === 'action'
+      ? [
+          columnHelper.accessor(
+            (row) => (isAction(row) ? row.actionCode : '-'),
+            {
+              id: 'actionCode',
+              header: 'Kode Aksi',
+              cell: ({ row }) => (
+                <span className="font-mono text-xs">
+                  {isAction(row.original) ? row.original.actionCode : '-'}
+                </span>
+              ),
+            },
+          ),
+          columnHelper.display({
+            id: 'usage',
+            header: 'Dipakai',
+            cell: ({ row }) => {
+              const count = matrixRows.filter((r) => r.actionId === row.original.id).length;
+              return (
+                <span className="text-xs text-muted-foreground">
+                  {count === 0 ? 'Belum dipasang' : `${count} kategori`}
+                </span>
+              );
+            },
+          }),
+        ]
+      : []),
+    columnHelper.accessor('name', {
+      header: 'Nama',
+      cell: ({ row }) => (
+        <p className="max-w-[240px] truncate text-sm font-medium">{row.original.name}</p>
+      ),
+    }),
+    // Tab Tipe Tiket tidak punya kolom deskripsi di database — menampilkan
+    // kolom "Deskripsi" berisi `-` permanen berarti berbohong. Kolomnya
+    // disembunyikan, bukan diisi placeholder.
+    ...(activeTab === 'ticketType'
+      ? []
+      : [
+          columnHelper.display({
+            id: 'detail',
+            header: detailHeader,
+            cell: ({ row }) => renderDetailCell(row.original),
+          }),
+        ]),
+    columnHelper.display({
+      id: 'status',
+      header: 'Status',
+      cell: ({ row }) => <StatusBadgeCell entry={row.original} />,
+    }),
+    ...(showReportColumn
+      ? [
+          columnHelper.display({
+            id: 'laporan',
+            header: 'Laporan Masalah',
+            cell: ({ row }: { row: { original: MasterDataEntry } }) => (
+              <a
+                href={`/admin/ticket/monitoring?${reportParam}=${row.original.id}`}
+                className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
+              >
+                Lihat tiket
+                <ExternalLink className="size-3" />
+              </a>
+            ),
+          }),
+        ]
+      : []),
+    columnHelper.display({
+      id: 'aksi',
+      header: () => <div className="text-right">Aksi</div>,
+      cell: ({ row }) => {
+        // `original` diekstrak agar type-guard `isCategory` tetap berlaku di
+        // dalam closure onClick (narrowing property access hilang di callback).
+        const original = row.original;
+        return (
+        <div className="flex items-center justify-end gap-1">
+          {/* Matriks kategori → aksi hanya relevan di tab Kategori — di sinilah
+              opsi dropdown reviewer ditentukan. */}
+          {activeTab === 'category' && isCategory(original) && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setMatrixCategory(original)}
+              aria-label={`Atur aksi untuk ${original.name}`}
+              title={`Atur aksi (${matrixRows.filter((r) => r.categoryId === original.id).length} terpasang)`}
+            >
+              <ListChecks className="size-4" />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => openEdit(original)}
+            aria-label={`Ubah ${original.name}`}
+          >
+            <Pencil className="size-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => openDelete(original)}
+            aria-label={`Hapus ${original.name}`}
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:ring-destructive/40"
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        </div>
+        );
+      },
+      enableHiding: false,
+    }),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -512,9 +776,9 @@ export default function AdminMasterDataPage() {
         onValueChange={(v) => setActiveTab(v as MasterDataType)}
       >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <TabsList className="flex w-full justify-start overflow-x-auto overflow-y-hidden rounded-lg no-scrollbar sm:w-auto sm:inline-flex">
+          <TabsList>
             {configs.map((c) => (
-              <TabsTrigger key={c.tab} value={c.tab} className="min-w-fit px-4 whitespace-nowrap">
+              <TabsTrigger key={c.tab} value={c.tab}>
                 {c.label}
               </TabsTrigger>
             ))}
@@ -526,39 +790,65 @@ export default function AdminMasterDataPage() {
         </div>
 
         {configs.map((c) => (
-                  <TabsContent key={c.tab} value={c.tab}>
-                    <Card className="w-full gap-0 overflow-hidden p-0">
-                      <CardContent className="p-4">
-                        <TableToolbar
-                          searchValue={search}
-                          onSearchChange={(v) => { setSearch(v); setCurrentPage(1); }}
-                          searchPlaceholder={`Cari ${title.toLowerCase()}...`}
-                          filters={getFiltersForTab(activeTab)}
-                          filterValues={filterValues}
-                          onFilterChange={(key, value) => setFilterValues(prev => ({ ...prev, [key]: value }))}
-                        />
-                      </CardContent>
+          <TabsContent key={c.tab} value={c.tab}>
+            <Card className="w-full gap-0 overflow-hidden p-0">
+              <CardContent className="p-4">
+                <TableToolbar
+                  searchValue={search}
+                  onSearchChange={(v) => { setSearch(v); setCurrentPage(1); }}
+                  searchPlaceholder={`Cari ${title.toLowerCase()}...`}
+                  filters={getFiltersForTab(activeTab)}
+                  filterValues={filterValues}
+                  onFilterChange={(key, value) => setFilterValues(prev => ({ ...prev, [key]: value }))}
+                  action={
+                    <ColumnToggle
+                      columns={columns}
+                      visibility={columnVisibility}
+                      onVisibilityChange={setColumnVisibility}
+                    />
+                  }
+                />
+              </CardContent>
 
               {/* Mobile card view */}
-              <div className="md:hidden px-4 pb-4">
+              <div
+                className={cn(
+                  'px-4 pb-4 transition-opacity md:hidden',
+                  loading && entries.length > 0 && 'pointer-events-none opacity-50',
+                )}
+              >
                 {entries.map((entry) => (
                   <div key={entry.id} className="mb-3 rounded-lg border bg-card py-4 last:mb-0">
                     <div className="px-4 space-y-2">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 space-y-0.5">
-                        {activeTab === 'productLine' && isProduct(entry) && (
-                          <p className="font-mono text-xs text-muted-foreground">{entry.productCode}</p>
-                        )}
-                        <p className="text-sm font-medium leading-snug">{entry.name}</p>
-                        <div className="text-xs text-muted-foreground">
-                          {activeTab === 'category' && renderDetailCell(entry)}
-                          {activeTab === 'department' && <>Kode: {(entry as DepartmentEntry).unitCode}</>}
-                          {activeTab === 'position' && <>Level: {(entry as PositionEntry).hierarchyLevel}</>}
-                          {activeTab === 'productLine' && <>{entry.description ?? '-'}</>}
-                        </div>
-                        {(activeTab === 'category' || activeTab === 'productLine') && (
-                          <div className="pt-1">
-                            {activeTab === 'category' ? (
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-0.5">
+                          {activeTab === 'action' && isAction(entry) && (
+                            <p className="font-mono text-xs text-muted-foreground">{entry.actionCode}</p>
+                          )}
+                          {activeTab === 'priority' && isPriority(entry) && (
+                            <p className="font-mono text-xs text-muted-foreground">{entry.priorityCode}</p>
+                          )}
+                          {activeTab === 'ticketType' && isTicketType(entry) && (
+                            <p className="font-mono text-xs text-muted-foreground">{entry.ticketTypeCode}</p>
+                          )}
+                          <p className="text-sm font-medium leading-snug">{entry.name}</p>
+                          <div className="text-xs text-muted-foreground">
+                            {activeTab === 'category' && renderDetailCell(entry)}
+                            {activeTab === 'department' && <>Kode: {(entry as DepartmentEntry).unitCode}</>}
+                            {activeTab === 'position' && <>Level: {(entry as PositionEntry).hierarchyLevel}</>}
+                            {activeTab === 'priority' && isPriority(entry) && <>Urutan: {entry.sortOrder}</>}
+                            {activeTab === 'action' && (
+                              <>
+                                {(() => {
+                                  const count = matrixRows.filter((r) => r.actionId === entry.id).length;
+                                  return count === 0 ? 'Belum dipasang' : `Dipakai di ${count} kategori`;
+                                })()}
+                                {entry.description ? ` · ${entry.description}` : ''}
+                              </>
+                            )}
+                          </div>
+                          {activeTab === 'category' && (
+                            <div className="pt-1">
                               <a
                                 href={`/admin/ticket/monitoring?category=${entry.id}`}
                                 className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
@@ -566,150 +856,94 @@ export default function AdminMasterDataPage() {
                                 Lihat tiket
                                 <ExternalLink className="size-3" />
                               </a>
-                            ) : (
-                              <a
-                                href={`/admin/ticket/monitoring?product=${entry.id}`}
-                                className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
-                              >
-                                Lihat tiket
-                                <ExternalLink className="size-3" />
-                              </a>
-                            )}
-                          </div>
-                        )}
+                            </div>
+                          )}
+                        </div>
+                        <StatusBadgeCell entry={entry} />
                       </div>
-                      <StatusBadgeCell entry={entry} />
-                    </div>
                       <div className="flex items-center justify-end gap-1">
-                        <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => openEdit(entry)}>
-                          <Pencil className="size-3.5" />
+                        {activeTab === 'category' && isCategory(entry) && (
+                          <Button variant="outline" size="sm" onClick={() => setMatrixCategory(entry)}>
+                            <ListChecks data-icon="inline-start" />
+                            Aksi
+                            {(() => {
+                              const count = matrixRows.filter((r) => r.categoryId === entry.id).length;
+                              return count > 0 ? ` (${count})` : '';
+                            })()}
+                          </Button>
+                        )}
+                        <Button variant="outline" size="sm" onClick={() => openEdit(entry)}>
+                          <Pencil data-icon="inline-start" />
                           Ubah
                         </Button>
-                        <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs text-destructive hover:bg-destructive/10" onClick={() => openDelete(entry)}>
-                          <Trash2 className="size-3.5" />
+                        <Button variant="destructive" size="sm" onClick={() => openDelete(entry)}>
+                          <Trash2 data-icon="inline-start" />
                           Hapus
                         </Button>
                       </div>
                     </div>
                   </div>
                 ))}
-                {loading ? (
-                  <p className="py-10 text-center text-sm text-muted-foreground">
-                    Memuat data...
-                  </p>
+                {loading && entries.length === 0 ? (
+                  <TableSkeleton rows={3} />
                 ) : entries.length === 0 ? (
-                  <p className="py-10 text-center text-sm text-muted-foreground">
-                    Tidak ada {title.toLowerCase()} yang ditemukan.
-                  </p>
+                  <Empty className="border-0 py-10">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        <Database />
+                      </EmptyMedia>
+                      <EmptyTitle>Tidak ada {title.toLowerCase()} yang ditemukan</EmptyTitle>
+                      <EmptyDescription>
+                        Ubah filter atau kata kunci pencarian, atau tambahkan {title.toLowerCase()} baru.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
                 ) : null}
               </div>
 
               {/* Desktop table */}
-              {entries.length > 0 && (
-                <div className="hidden md:block">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        {activeTab === 'productLine' && (
-                          <TableHead className="bg-muted/50 px-6 py-3">Kode Produk</TableHead>
-                        )}
-                        <TableHead className="bg-muted/50 px-6 py-3">Nama</TableHead>
-                        <TableHead className="bg-muted/50 px-6 py-3">
-                          {activeTab === 'category' ? 'Parent' : activeTab === 'department' ? 'Kode Unit' : activeTab === 'position' ? 'Level' : 'Deskripsi'}
-                        </TableHead>
-                        <TableHead className="bg-muted/50 px-6 py-3">Status</TableHead>
-                        {(activeTab === 'category' || activeTab === 'productLine') && (
-                          <TableHead className="bg-muted/50 px-6 py-3">Laporan Masalah</TableHead>
-                        )}
-                        <TableHead className="bg-muted/50 px-6 py-3 text-right">Aksi</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {entries.map((entry) => (
-                        <TableRow key={entry.id}>
-                          {activeTab === 'productLine' && isProduct(entry) && (
-                            <TableCell className="px-6 py-3 font-mono text-xs">{entry.productCode}</TableCell>
-                          )}
-                          <TableCell className="px-6 py-3">
-                            <div className="space-y-0.5">
-                              <p className="text-sm font-medium">{entry.name}</p>
-                              <p className="text-xs text-muted-foreground">#{entry.id}</p>
-                            </div>
-                          </TableCell>
-                          <TableCell className="px-6 py-3">{renderDetailCell(entry)}</TableCell>
-                          <TableCell className="px-6 py-3">
-                            <StatusBadgeCell entry={entry} />
-                          </TableCell>
-                          {(activeTab === 'category' || activeTab === 'productLine') && (
-                            <TableCell className="px-6 py-3">
-                              {activeTab === 'category' ? (
-                                <a
-                                  href={`/admin/ticket/monitoring?category=${entry.id}`}
-                                  className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
-                                >
-                                  Lihat tiket
-                                  <ExternalLink className="size-3" />
-                                </a>
-                              ) : (
-                                <a
-                                  href={`/admin/ticket/monitoring?product=${entry.id}`}
-                                  className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
-                                >
-                                  Lihat tiket
-                                  <ExternalLink className="size-3" />
-                                </a>
-                              )}
-                            </TableCell>
-                          )}
-                          <TableCell className="px-6 py-3 text-right">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => openEdit(entry)}
-                              aria-label={`Ubah ${entry.name}`}
-                            >
-                              <Pencil className="size-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => openDelete(entry)}
-                              aria-label={`Hapus ${entry.name}`}
-                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                            >
-                              <Trash2 className="size-4" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-
-              {totalPages > 1 && (
-                <div className="border-t px-6 py-4">
-                  <Pagination className="mx-0 w-auto justify-end">
-                    <PaginationPrevious onClick={() => goToPage(safePage - 1)} />
-                    <PaginationContent>
-                      {getPaginationItems().map((item, i) =>
-                        item === 'ellipsis' ? (
-                          <PaginationItem key={`e-${i}`}>
-                            <PaginationEllipsis />
-                          </PaginationItem>
-                        ) : (
-                          <PaginationItem key={item}>
-                            <PaginationLink isActive={item === safePage} onClick={() => goToPage(item as number)}>
-                              {item}
-                            </PaginationLink>
-                          </PaginationItem>
-                        )
-                      )}
-                    </PaginationContent>
-                    <PaginationNext onClick={() => goToPage(safePage + 1)} />
-                  </Pagination>
-                </div>
-              )}
+              <div className="hidden px-4 pb-4 md:block">
+                {loading && entries.length === 0 ? (
+                  <TableSkeleton rows={8} />
+                ) : (
+                  <DataTable
+                    isPending={loading}
+                    mode="server"
+                    columns={columns}
+                    data={entries}
+                    showRowNumbers
+                    rowNumberOffset={(safePage - 1) * perPage}
+                    columnVisibility={columnVisibility}
+                    onColumnVisibilityChange={setColumnVisibility}
+                    empty={(
+                  <Empty className="border-0 py-14">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        <Database />
+                      </EmptyMedia>
+                      <EmptyTitle>Tidak ada {title.toLowerCase()} yang ditemukan</EmptyTitle>
+                      <EmptyDescription>
+                        Ubah filter atau kata kunci pencarian, atau tambahkan {title.toLowerCase()} baru.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                )}
+                    footer={() => (
+                      <DataTablePagination
+                        page={safePage}
+                        lastPage={totalPages}
+                        total={filteredEntries.length}
+                        perPage={perPage}
+                        onPageChange={goToPage}
+                        onPerPageChange={(n) => {
+                          setPerPage(n);
+                          setCurrentPage(1);
+                        }}
+                      />
+                    )}
+                  />
+                )}
+              </div>
             </Card>
           </TabsContent>
         ))}
@@ -783,19 +1017,6 @@ export default function AdminMasterDataPage() {
               />
             </Field>
 
-            {activeTab === 'productLine' && (
-              <Field>
-                <FieldLabel>Kode Produk *</FieldLabel>
-                <Input
-                  value={productCode}
-                  onChange={(e) => setProductCode(e.target.value)}
-                  placeholder="e.g. ECU, CDI, CVT"
-                  className="w-full font-mono"
-                />
-                <p className="text-xs text-muted-foreground">Kode produk berbeda dari ID produk internal.</p>
-              </Field>
-            )}
-
             {activeTab === 'department' && (
               <Field>
                 <FieldLabel>Kode Unit *</FieldLabel>
@@ -808,40 +1029,112 @@ export default function AdminMasterDataPage() {
               </Field>
             )}
 
-            {activeTab === 'position' && (
-                          <>
-                            <Field>
-                              <FieldLabel>Departemen *</FieldLabel>
-                              <Select
-                                value={departmentId}
-                                onValueChange={(v) => setDepartmentId(v ?? '')}
-                                items={departments.map((d) => ({ value: d.id, label: d.name }))}
-                              >
-                                <SelectTrigger className="w-full">
-                                  <SelectValue placeholder="Pilih departemen" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectGroup>
-                                    {departments.map((d) => (
-                                      <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                                    ))}
-                                  </SelectGroup>
-                                </SelectContent>
-                              </Select>
-                            </Field>
-                            <Field>
-                              <FieldLabel>Level Hierarki *</FieldLabel>
-                              <Input
-                                value={hierarchyLevel}
-                                onChange={(e) => setHierarchyLevel(e.target.value)}
-                                placeholder="e.g. 30"
-                                className="w-full font-mono"
-                              />
-                            </Field>
-                          </>
-                        )}
+            {activeTab === 'action' && (
+              <Field>
+                <FieldLabel>Kode Aksi *</FieldLabel>
+                <Input
+                  value={actionCode}
+                  onChange={(e) => setActionCode(e.target.value.toUpperCase())}
+                  placeholder="e.g. RETURN_AND_REPLACE"
+                  className="w-full font-mono"
+                  disabled={!!editing}
+                />
+                {editing ? (
+                  <p className="text-xs text-muted-foreground">
+                    Kode tidak dapat diubah setelah dibuat — dipakai sebagai identitas aksi oleh reviewer.
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Huruf kapital, tanpa spasi.</p>
+                )}
+              </Field>
+            )}
 
-            {activeTab !== 'position' && (
+            {activeTab === 'priority' && (
+              <>
+                <Field>
+                  <FieldLabel>Kode Prioritas *</FieldLabel>
+                  <Input
+                    value={priorityCode}
+                    onChange={(e) => setPriorityCode(e.target.value.toUpperCase())}
+                    placeholder="e.g. D"
+                    className="w-full font-mono"
+                    disabled={!!editing}
+                  />
+                  {editing && (
+                    <p className="text-xs text-muted-foreground">
+                      Kode tidak dapat diubah setelah dibuat — dipakai sebagai key filter dan badge.
+                    </p>
+                  )}
+                </Field>
+                <Field>
+                  <FieldLabel>Urutan Tampil</FieldLabel>
+                  <Input
+                    value={sortOrder}
+                    onChange={(e) => setSortOrder(e.target.value.replace(/[^0-9]/g, ''))}
+                    placeholder="Kosongkan untuk taruh paling bawah"
+                    className="w-full font-mono"
+                  />
+                </Field>
+              </>
+            )}
+
+            {activeTab === 'ticketType' && (
+              <Field>
+                <FieldLabel>Kode Tipe *</FieldLabel>
+                <Input
+                  value={ticketTypeCode}
+                  onChange={(e) => setTicketTypeCode(e.target.value.toUpperCase())}
+                  placeholder="e.g. SARAN"
+                  className="w-full font-mono"
+                  disabled={!!editing}
+                />
+                {editing ? (
+                  <p className="text-xs text-muted-foreground">
+                    Kode tidak dapat diubah setelah dibuat — dipakai sebagai key filter dan badge.
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Huruf kapital, tanpa spasi.</p>
+                )}
+              </Field>
+            )}
+
+            {activeTab === 'position' && (
+              <>
+                <Field>
+                  <FieldLabel>Departemen *</FieldLabel>
+                  <Select
+                    value={departmentId}
+                    onValueChange={(v) => setDepartmentId(v ?? '')}
+                    items={departments.map((d) => ({ value: d.id, label: d.name }))}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Pilih departemen" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {departments.map((d) => (
+                          <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field>
+                  <FieldLabel>Level Hierarki *</FieldLabel>
+                  <Input
+                    value={hierarchyLevel}
+                    onChange={(e) => setHierarchyLevel(e.target.value)}
+                    placeholder="e.g. 30"
+                    className="w-full font-mono"
+                  />
+                </Field>
+              </>
+            )}
+
+            {/* Deskripsi hanya untuk tipe yang punya kolomnya — position,
+                priority, dan ticket_type tidak punya. Menampilkannya akan
+                menyiratkan data tersimpan padahal dibuang saat validasi. */}
+            {!['position', 'priority', 'ticketType'].includes(activeTab) && (
               <Field>
                 <FieldLabel>Deskripsi</FieldLabel>
                 <Textarea
@@ -855,35 +1148,47 @@ export default function AdminMasterDataPage() {
           </div>
 
           <DialogFooter>
-                      <Button variant="outline" onClick={() => setDialogOpen(false)}>Batal</Button>
-                      <Button onClick={handleSave} disabled={loading}>
-                        {loading ? 'Menyimpan...' : 'Simpan'}
-                      </Button>
-                    </DialogFooter>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>Batal</Button>
+            <Button onClick={handleSave} disabled={loading}>
+              {loading ? 'Menyimpan...' : 'Simpan'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Delete confirm */}
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Hapus {title}?</DialogTitle>
-            <DialogDescription>
-              "{deleteTarget?.name ?? ''}" akan dihapus permanen. Data referensi yang sedang dipakai tiket tidak dapat dihapus.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-                      <Button variant="outline" onClick={() => setConfirmOpen(false)}>Batal</Button>
-                      <Button
-                        className="bg-destructive hover:bg-destructive/90"
-                        onClick={handleDelete}
-                        disabled={loading}
-                      >
-                        {loading ? 'Menghapus...' : 'Ya, Hapus'}
-                      </Button>
-                    </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={`Hapus ${title}?`}
+        description={`"${deleteTarget?.name ?? ''}" akan dihapus permanen. Data referensi yang sedang dipakai tiket tidak dapat dihapus.`}
+        confirmLabel="Ya, Hapus"
+        variant="destructive"
+        loading={loading}
+        onConfirm={handleDelete}
+      />
+
+      {/* Editor matriks kategori → aksi (dari tab Kategori) */}
+      <CategoryActionDialog
+        open={matrixCategory !== null}
+        onOpenChange={(open) => {
+          if (!open) setMatrixCategory(null);
+        }}
+        category={matrixCategory ? { id: matrixCategory.id, name: matrixCategory.name } : null}
+        actions={actions.map((a) => ({
+          id: a.id,
+          code: a.actionCode,
+          name: a.name,
+          description: a.description ?? null,
+          isActive: a.isActive,
+        }))}
+        onSync={(categoryId, rows) => {
+          setMatrixRows((prev) => [
+            ...prev.filter((r) => r.categoryId !== categoryId),
+            ...rows,
+          ]);
+        }}
+      />
     </div>
   );
 }

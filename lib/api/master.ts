@@ -7,14 +7,6 @@
 
 import { authenticatedFetch } from './fetch-wrapper';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
-
-async function authToken(): Promise<string> {
-  const token = typeof window === 'undefined' ? null : localStorage.getItem('brthub_token');
-  if (!token) throw new Error('Sesi Anda tidak ditemukan. Silakan masuk kembali.');
-  return token;
-}
-
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -59,12 +51,20 @@ export interface RawPosition {
   isActive: boolean;
 }
 
-/** Bentuk mentah satu baris produk dari backend. */
-export interface RawProduct {
+/** Master prioritas (A/B/C) - hanya yang aktif (backend memfilter `is_active`). */
+export interface RawPriority {
   id: string;
   code: string;
   name: string;
-  description: string | null;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+/** Master tipe tiket (REQUEST/INCIDENT/...) — hanya yang aktif. */
+export interface RawTicketType {
+  id: string;
+  code: string;
+  name: string;
   isActive: boolean;
 }
 
@@ -74,6 +74,7 @@ export interface RawAction {
   code: string;
   name: string;
   description: string | null;
+  isActive: boolean;
 }
 
 /** Mapping kategori → aksi, termasuk flag rekomendasi per subkategori. */
@@ -87,7 +88,10 @@ export interface MasterDataAll {
   categories: RawCategory[];
   departments: RawDepartment[];
   positions: RawPosition[];
-  products: RawProduct[];
+  /** Prioritas aktif untuk dropdown & filter - sumber kebenaran, bukan hardcode. */
+  priorities: RawPriority[];
+  /** Tipe tiket aktif untuk dropdown & filter. */
+  ticketTypes: RawTicketType[];
   /** Master aksi handler (tabel `actions`) — sumber kebenaran label & opsi. */
   actions: RawAction[];
   /** Matrix kategori × aksi (tabel `category_actions`) + flag rekomendasi. */
@@ -100,7 +104,6 @@ export interface MasterDataAll {
  * melihat data nonaktif juga, bukan hanya yang aktif).
  */
 export async function getMasterDataAll(): Promise<MasterDataAll> {
-  const token = await authToken();
   const response = await authenticatedFetch(`/api/master/all?include_inactive=1`, {
     headers: { Accept: 'application/json' },
   });
@@ -140,18 +143,25 @@ export async function getMasterDataAll(): Promise<MasterDataAll> {
       hierarchyLevel: number(p.hierarchy_level),
       isActive: p.is_active !== false,
     })),
-    products: arr(item.products).map((p) => ({
+    priorities: arr(item.priorities).map((p) => ({
       id: string(p.id),
       code: string(p.code),
       name: string(p.name),
-      description: p.description ? string(p.description) : null,
+      sortOrder: number(p.sort_order),
       isActive: p.is_active !== false,
+    })),
+    ticketTypes: arr(item.ticketTypes).map((t) => ({
+      id: string(t.id),
+      code: string(t.code),
+      name: string(t.name),
+      isActive: t.is_active !== false,
     })),
     actions: arr(item.actions).map((a) => ({
       id: string(a.id),
       code: string(a.code),
       name: string(a.name),
       description: a.description ? string(a.description) : null,
+      isActive: a.is_active !== false,
     })),
     categoryActions: arr(item.category_actions).map((ca) => ({
       categoryId: string(ca.category_id),
@@ -220,15 +230,10 @@ async function adminMasterRequest<T>(
   id?: string,
   body?: CreateMasterDataPayload
 ): Promise<T> {
-  const token = await authToken();
-  const url = `${API_URL}/api/admin/master/${type}${id ? `/${id}` : ''}`;
-  const response = await fetch(url, {
+  // Lewat wrapper: 401 memicu refresh + retry otomatis. Pola lama (fetch
+  // manual + Bearer manual) gagal tanpa kesempatan refresh.
+  const response = await authenticatedFetch(`/api/admin/master/${type}${id ? `/${id}` : ''}`, {
     method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
     body: body ? JSON.stringify(toBackendPayload(body)) : undefined,
   });
 
@@ -249,9 +254,18 @@ async function adminMasterRequest<T>(
   return payload as T;
 }
 
+/** Tipe master yang bisa di-CRUD lewat endpoint admin generik. */
+export type MasterDataCrudType =
+  | 'category'
+  | 'department'
+  | 'position'
+  | 'action'
+  | 'priority'
+  | 'ticket_type';
+
 /** Create master data. POST /api/admin/master/{type} */
 export async function createMasterData(
-  type: 'category' | 'department' | 'position' | 'product',
+  type: MasterDataCrudType,
   payload: CreateMasterDataPayload
 ): Promise<{ id: string; [key: string]: unknown }> {
   return adminMasterRequest(type, 'POST', undefined, payload);
@@ -259,7 +273,7 @@ export async function createMasterData(
 
 /** Update master data. PUT /api/admin/master/{type}/{id} */
 export async function updateMasterData(
-  type: 'category' | 'department' | 'position' | 'product',
+  type: MasterDataCrudType,
   id: string,
   payload: CreateMasterDataPayload
 ): Promise<{ id: string; [key: string]: unknown }> {
@@ -267,9 +281,104 @@ export async function updateMasterData(
 }
 
 /** Delete master data. DELETE /api/admin/master/{type}/{id} */
-export async function deleteMasterData(
-  type: 'category' | 'department' | 'position' | 'product',
-  id: string
-): Promise<void> {
+export async function deleteMasterData(type: MasterDataCrudType, id: string): Promise<void> {
   await adminMasterRequest(type, 'DELETE', id);
+}
+
+/** Satu baris mapping kategori → aksi (dengan info aksi untuk editor matriks). */
+export interface CategoryActionRow {
+  categoryId: string;
+  actionId: string;
+  isRecommended: boolean;
+  action?: { id: string; code: string; name: string; isActive?: boolean };
+}
+
+/** Helper: request ke endpoint matriks kategori-aksi (payload bebas, bukan CRUD generik). */
+async function categoryActionRequest<T>(
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  path: string,
+  body?: Record<string, unknown>
+): Promise<T> {
+  // Lewat wrapper: 401 memicu refresh + retry otomatis.
+  const response = await authenticatedFetch(`/api/admin/master/category-actions${path}`, {
+    method,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  const payload: unknown = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const msg = string(record(payload).message, 'Operasi gagal.');
+    const err = new Error(msg) as Error & { status: number; errors?: ApiErrorResponse['errors'] };
+    err.status = response.status;
+    err.errors = record(payload).errors as ApiErrorResponse['errors'];
+    throw err;
+  }
+
+  if (method === 'DELETE') {
+    return undefined as T;
+  }
+
+  return payload as T;
+}
+
+function toCategoryActionRow(value: unknown): CategoryActionRow {
+  const row = record(value);
+  const action = record(row.action);
+  return {
+    categoryId: string(row.category_id),
+    actionId: string(row.action_id),
+    isRecommended: row.is_recommended === true || row.is_recommended === 1,
+    action: action.id
+      ? {
+          id: string(action.id),
+          code: string(action.code),
+          name: string(action.name),
+          isActive: action.is_active !== false,
+        }
+      : undefined,
+  };
+}
+
+/** Daftar mapping, opsional disaring per kategori. GET /api/admin/master/category-actions */
+export async function getCategoryActions(categoryId?: string): Promise<CategoryActionRow[]> {
+  const query = categoryId ? `?category_id=${encodeURIComponent(categoryId)}` : '';
+  const payload = await categoryActionRequest<unknown>('GET', query);
+  return (Array.isArray(payload) ? payload : []).map(toCategoryActionRow);
+}
+
+/** Pasang aksi ke kategori. POST /api/admin/master/category-actions */
+export async function attachCategoryAction(
+  categoryId: string,
+  actionId: string,
+  isRecommended = false
+): Promise<CategoryActionRow> {
+  const payload = await categoryActionRequest<unknown>('POST', '', {
+    category_id: Number(categoryId),
+    action_id: Number(actionId),
+    is_recommended: isRecommended,
+  });
+  return toCategoryActionRow(payload);
+}
+
+/** Ubah flag rekomendasi. PUT /api/admin/master/category-actions/{category}/{action} */
+export async function updateCategoryAction(
+  categoryId: string,
+  actionId: string,
+  isRecommended: boolean
+): Promise<CategoryActionRow> {
+  const payload = await categoryActionRequest<unknown>(
+    'PUT',
+    `/${encodeURIComponent(categoryId)}/${encodeURIComponent(actionId)}`,
+    { is_recommended: isRecommended }
+  );
+  return toCategoryActionRow(payload);
+}
+
+/** Lepas aksi dari kategori. DELETE /api/admin/master/category-actions/{category}/{action} */
+export async function detachCategoryAction(categoryId: string, actionId: string): Promise<void> {
+  await categoryActionRequest<void>(
+    'DELETE',
+    `/${encodeURIComponent(categoryId)}/${encodeURIComponent(actionId)}`
+  );
 }

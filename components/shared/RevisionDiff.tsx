@@ -10,6 +10,7 @@ const FIELD_LABELS: Record<string, string> = {
   ticket_type_id: 'Tipe Tiket',
   priority_id: 'Prioritas',
   product_id: 'Produk',
+  group_code: 'Lini Produk',
   vehicle_model: 'Model Kendaraan',
   so_number: 'Nomor SO',
   sales_name: 'Nama Sales',

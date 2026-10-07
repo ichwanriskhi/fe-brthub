@@ -84,7 +84,7 @@ export async function getAdminCustomers(
   return adminFetch<AdminCustomersResponse>(`/api/admin/customers?${searchParams.toString()}`);
 }
 
-// Helper untuk transform ke bentuk yang dipakai UI (mirip MOCK_CUSTOMERS)
+/** Bentuk data pelanggan yang dipakai layer UI. */
 export interface CustomerEntry {
   id: string;
   code: string;

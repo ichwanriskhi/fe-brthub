@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
+import { Spinner } from '@/components/ui/spinner';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 
@@ -60,7 +60,7 @@ export function ReporterGuard({ children }: { children: React.ReactNode }) {
         <Card>
           <CardContent className="flex min-h-64 items-center justify-center py-12">
             <div className="flex flex-col items-center gap-3 text-muted-foreground">
-              <Loader2 className="size-8 animate-spin text-primary" />
+              <Spinner className="size-8 text-primary" />
               <span className="text-sm">Memeriksa sesi pelapor…</span>
             </div>
           </CardContent>

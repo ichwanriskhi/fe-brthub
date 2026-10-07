@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -13,13 +13,15 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SoCombobox } from '@/components/shared/SoCombobox';
 import { ClaimItemSelect } from '@/components/shared/ClaimItemSelect';
+import { FileDropzone } from '@/components/shared/FileDropzone';
+import { LocalAttachmentList } from '@/components/shared/AttachmentList';
 import {
   CLAIM_ITEM_ROLES,
   SUBCATEGORY_CLAIM_CONFIG,
   type ClaimItemRole,
   type SubcategoryClaimConfig,
 } from '@/lib/constants/claim';
-import { loadSapOrderItems, searchSapMasterItems, type SapOrderItem, type SapMasterItem } from '@/lib/api/sap';
+import { loadSapOrderItems, searchSapMasterItems, getItemGroups, type SapOrderItem, type SapItemGroup } from '@/lib/api/sap';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
   Field,
@@ -31,33 +33,21 @@ import {
   FieldSet,
   FieldTitle,
 } from '@/components/ui/field';
-import { ArrowRight, ArrowLeft, UploadCloud, XIcon, PlusIcon, Loader2 } from 'lucide-react';
+import { ArrowRight, ArrowLeft, XIcon, PlusIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const TICKET_TYPES = [
-  {
-    value: 'REQUEST',
-    label: 'Request',
-    desc: 'Permintaan barang, layanan, atau informasi tertentu.',
-  },
-  {
-    value: 'INCIDENT',
-    label: 'Incident',
-    desc: 'Kejadian tak terduga yang mengganggu operasional.',
-  },
-  {
-    value: 'COMPLAINT',
-    label: 'Complaint',
-    desc: 'Keluhan atas produk, layanan, atau penanganan.',
-  },
-  {
-    value: 'INQUIRY',
-    label: 'Inquiry',
-    desc: 'Pertanyaan atau permintaan informasi umum.',
-  },
-] as const;
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+// Deskripsi statis untuk tipe bawaan — copywriting, bukan aturan. Tipe baru
+// dari master data tampil dengan namanya saja (tanpa deskripsi).
+const TICKET_TYPE_DESCRIPTIONS: Record<string, string> = {
+  REQUEST: 'Permintaan barang, layanan, atau informasi tertentu.',
+  INCIDENT: 'Kejadian tak terduga yang mengganggu operasional.',
+  COMPLAINT: 'Keluhan atas produk, layanan, atau penanganan.',
+  INQUIRY: 'Pertanyaan atau permintaan informasi umum.',
+};
 
 interface ClaimRowEntry {
   id: string;
@@ -65,9 +55,13 @@ interface ClaimRowEntry {
   role1: ClaimItemRole | '';
   itemCode1: string;
   itemName1: string;
+  /** True bila item1 berasal dari ketikan bebas (bukan master/SO). */
+  itemCustom1?: boolean;
   role2: ClaimItemRole | '';
   itemCode2: string;
   itemName2: string;
+  /** True bila item2 berasal dari ketikan bebas (bukan master/SO). */
+  itemCustom2?: boolean;
   qty: number;
   reason: string;
 }
@@ -128,12 +122,6 @@ interface Category {
   children?: Subcategory[];
 }
 
-interface Product {
-  id: number;
-  code: string;
-  name: string;
-}
-
 interface IdentityStatusData {
   is_defined: boolean;
   /** true = profil pelapor (nama+telepon+email) sudah tersimpan & terkunci di Auth Service */
@@ -160,6 +148,13 @@ interface AuthUserProfile {
   phone_number: string | null;
 }
 
+/**
+ * Penanda wajib. Sengaja TIDAK `aria-hidden` — asterisk dekoratif boleh
+ * disembunyikan, tapi screen reader tetap harus tahu field ini wajib diisi.
+ * Sumber kebenaran untuk assistif tech adalah atribut `required` pada kontrol
+ *nya; validator di wizard ini pakai tombol "Lanjut", jadi atribut `required`
+ * tidak akan memblokir submit native.
+ */
 const RequiredIndicator = () => (
   <span aria-hidden="true" className="ml-1 text-destructive">
     *
@@ -184,7 +179,12 @@ export default function CreateReportPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  // Lini Produk = Item Group WANSIS (bukan tabel lokal `products` — dihapus).
+  // Yang disimpan kode grup, nama hanya label.
+  const [itemGroups, setItemGroups] = useState<SapItemGroup[]>([]);
+  const [groupsLoaded, setGroupsLoaded] = useState(false);
+  // Opsi tipe laporan — dari `GET /api/master/all`, bukan hardcode.
+  const [ticketTypeOptions, setTicketTypeOptions] = useState<{ code: string; name: string }[]>([]);
   const [existingTickets, setExistingTickets] = useState<TicketSummary[]>([]);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
@@ -192,7 +192,7 @@ export default function CreateReportPage() {
   // Form State - initialized clean without dummy data.
   // Setiap dropdown default-nya KOSONG agar placeholder "Pilih ..." tampil.
   const [formData, setFormData] = useState({
-    ticketType: '' as '' | 'REQUEST' | 'INCIDENT' | 'COMPLAINT' | 'INQUIRY',
+    ticketType: '' as string,
     name: '',
     phone: '',
     email: '',
@@ -317,8 +317,10 @@ export default function CreateReportPage() {
       .find((ch) => ch.code === formData.subcategory)?.name ||
     formData.subcategory;
 
-  // Dynamic Product Lines (Lini Produk) — 100% dari backend, tanpa hardcode
-  const availableProductLines = products.map((p) => p.name);
+  // Lini Produk = Item Group WANSIS. formData.productLine menyimpan KODE grup.
+  const availableProductLines = itemGroups.filter((g) => g.code !== null);
+  const productLineName = (code: string) =>
+    itemGroups.find((g) => g.code === code)?.name ?? code;
 
   // Dynamic Positions based on selected Department
   const availablePositions = formData.department
@@ -362,12 +364,32 @@ export default function CreateReportPage() {
         if (data.categories && data.categories.length > 0) {
           setCategories(data.categories);
         }
-        if (data.products && data.products.length > 0) {
-          setProducts(data.products);
+        // Opsi tipe laporan dari backend — tipe baru/nonaktif dari master data
+        // langsung tercermin tanpa deploy.
+        if (Array.isArray(data.ticketTypes) && data.ticketTypes.length > 0) {
+          setTicketTypeOptions(
+            data.ticketTypes.map((t: { code: string; name: string }) => ({
+              code: String(t.code),
+              name: String(t.name),
+            }))
+          );
         }
       })
       .catch(() => {
         // Fallback silently if master endpoint not ready
+      });
+
+    // Lini Produk = Item Group WANSIS (endpoint terpisah, cache server).
+    getItemGroups()
+      .then((groups) => {
+        if (groups.length > 0) setItemGroups(groups);
+      })
+      .catch(() => {
+        // Dropdown kosong — bukan hardcode. Halaman tetap bisa lanjut bila
+        // kategori bukan kendaraan.
+      })
+      .finally(() => {
+        setGroupsLoaded(true);
       });
 
     // Fetch real tickets for relation dropdown (sesi reporter)
@@ -591,22 +613,8 @@ export default function CreateReportPage() {
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const files = Array.from(e.target.files);
-      setAttachments((prev) => [...prev, ...files]);
-      toast.success(`${files.length} file berhasil ditambahkan`);
-    }
-  };
-
   const removeAttachment = (index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   const handleSubmitReport = async () => {
@@ -701,7 +709,7 @@ export default function CreateReportPage() {
 
       // Vehicle / Claim details
       if (isVehicleCategory) {
-        payload.append('product_line', formData.productLine);
+        payload.append('product_group_code', formData.productLine);
         payload.append('vehicle_model', formData.vehicleModel);
       }
 
@@ -988,18 +996,20 @@ export default function CreateReportPage() {
       <RadioGroup
         value={formData.ticketType}
         onValueChange={(val: string | null) => {
-          if (val) setField('ticketType', val as typeof formData.ticketType);
+          if (val) setField('ticketType', val);
         }}
         className="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
-        {TICKET_TYPES.map((t) => (
-          <FieldLabel key={t.value} htmlFor={`type-${t.value}`}>
+        {ticketTypeOptions.map((t) => (
+          <FieldLabel key={t.code} htmlFor={`type-${t.code}`}>
             <Field orientation="horizontal" className="w-full">
               <FieldContent className="flex-1">
-                <FieldTitle>{t.label}</FieldTitle>
-                <FieldDescription>{t.desc}</FieldDescription>
+                <FieldTitle>{t.name}</FieldTitle>
+                {TICKET_TYPE_DESCRIPTIONS[t.code] && (
+                  <FieldDescription>{TICKET_TYPE_DESCRIPTIONS[t.code]}</FieldDescription>
+                )}
               </FieldContent>
-              <RadioGroupItem value={t.value} id={`type-${t.value}`} />
+              <RadioGroupItem value={t.code} id={`type-${t.code}`} />
             </Field>
           </FieldLabel>
         ))}
@@ -1009,7 +1019,7 @@ export default function CreateReportPage() {
 
   // Step: Detail Pengajuan
   const renderDetailStep = () => (
-    <FieldSet className="space-y-8">
+    <FieldGroup className="gap-8">
       <FieldSet>
         <FieldLegend>Detail Pengajuan</FieldLegend>
         <FieldDescription>Detail jenis laporan dan permasalahan yang dialami.</FieldDescription>
@@ -1097,11 +1107,9 @@ export default function CreateReportPage() {
 
       {/* ── Data penjualan + barang klaim: HANYA kategori Klaim Distribusi & Pengiriman ── */}
       {isClaimCategory && (
-        <div className="flex flex-col gap-6 rounded-lg border bg-muted/30 p-4">
-          <div className="space-y-1">
-            <p className="text-sm font-semibold text-foreground">Informasi Klaim Distribusi</p>
-            <FieldDescription>Isi detail SO dan barang terkait klaim.</FieldDescription>
-          </div>
+        <FieldSet className="gap-4 rounded-lg border bg-muted/30 p-4">
+          <FieldLegend>Informasi Klaim Distribusi</FieldLegend>
+          <FieldDescription>Isi detail SO dan barang terkait klaim.</FieldDescription>
 
           <FieldGroup className="grid gap-4 sm:grid-cols-2">
             <Field>
@@ -1148,7 +1156,7 @@ export default function CreateReportPage() {
                                     type="button"
                                     variant="link"
                                     size="xs"
-                                    className="h-auto p-0 text-xs"
+                                    className="h-auto p-0"
                                     onClick={() => updateClaimRow(row.id, { hasSecondColumn: !row.hasSecondColumn })}
                                   >
                                     {row.hasSecondColumn ? '− Kolom 2' : '+ Kolom 2'}
@@ -1168,7 +1176,7 @@ export default function CreateReportPage() {
                                   aria-label="Hapus baris klaim"
                                   onClick={() => removeClaimRow(row.id)}
                                 >
-                                  <XIcon className="size-3.5" />
+                                  <XIcon />
                                 </Button>
                               )}
                             </div>
@@ -1218,21 +1226,37 @@ export default function CreateReportPage() {
                                     value={row.itemCode1}
                                     selectedName={row.itemName1}
                                     showNameInTrigger={false}
-                                    onValueChange={(code, name) =>
-                                      updateClaimRow(row.id, { itemCode1: code, itemName1: name })
+                                    allowCustom
+                                    onValueChange={(code, name, opts) =>
+                                      updateClaimRow(row.id, {
+                                        itemCode1: code,
+                                        itemName1: name,
+                                        itemCustom1: opts?.isCustom ?? false,
+                                      })
                                     }
                                     loading={sapLoading}
                                     disabled={!formData.soNumber}
                                     error={sapError}
                                     placeholder="Pilih barang…"
                                   />
-                                  {row.itemName1 && (
-                                    <p
-                                      className="text-[11px] text-muted-foreground truncate min-w-0"
-                                      title={row.itemName1}
-                                    >
-                                      {row.itemName1}
+                                  {row.itemCustom1 ? (
+                                    <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground min-w-0">
+                                      <span className="truncate font-mono min-w-0" title={row.itemCode1}>
+                                        {row.itemCode1}
+                                      </span>
+                                      <Badge variant="outline" className="shrink-0 text-[10px]">
+                                        Teks bebas
+                                      </Badge>
                                     </p>
+                                  ) : (
+                                    row.itemName1 && (
+                                      <p
+                                        className="text-[11px] text-muted-foreground truncate min-w-0"
+                                        title={row.itemName1}
+                                      >
+                                        {row.itemName1}
+                                      </p>
+                                    )
                                   )}
                                 </div>
                               </div>
@@ -1281,8 +1305,13 @@ export default function CreateReportPage() {
                                     value={row.itemCode2}
                                     selectedName={row.itemName2}
                                     showNameInTrigger={false}
-                                    onValueChange={(code, name) =>
-                                      updateClaimRow(row.id, { itemCode2: code, itemName2: name })
+                                    allowCustom
+                                    onValueChange={(code, name, opts) =>
+                                      updateClaimRow(row.id, {
+                                        itemCode2: code,
+                                        itemName2: name,
+                                        itemCustom2: opts?.isCustom ?? false,
+                                      })
                                     }
                                     loading={sapLoading}
                                     disabled={!formData.soNumber}
@@ -1291,13 +1320,24 @@ export default function CreateReportPage() {
                                     mode="master"
                                     onSearch={searchSapMasterItems}
                                   />
-                                  {row.itemName2 && (
-                                    <p
-                                      className="text-[11px] text-muted-foreground truncate min-w-0"
-                                      title={row.itemName2}
-                                    >
-                                      {row.itemName2}
+                                  {row.itemCustom2 ? (
+                                    <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground min-w-0">
+                                      <span className="truncate font-mono min-w-0" title={row.itemCode2}>
+                                        {row.itemCode2}
+                                      </span>
+                                      <Badge variant="outline" className="shrink-0 text-[10px]">
+                                        Teks bebas
+                                      </Badge>
                                     </p>
+                                  ) : (
+                                    row.itemName2 && (
+                                      <p
+                                        className="text-[11px] text-muted-foreground truncate min-w-0"
+                                        title={row.itemName2}
+                                      >
+                                        {row.itemName2}
+                                      </p>
+                                    )
                                   )}
                                 </div>
                               </div>
@@ -1344,44 +1384,47 @@ export default function CreateReportPage() {
               className="border-dashed"
               onClick={addClaimRow}
             >
-              <PlusIcon className="size-4" /> Tambah Baris Klaim Baru
+              <PlusIcon data-icon="inline-start" />
+              Tambah Baris Klaim Baru
             </Button>
           </Field>
-        </div>
+        </FieldSet>
       )}
 
       {/* ── Kendaraan: product line & model kendaraan HANYA utk kategori Kendaraan ── */}
       {isVehicleCategory && (
-        <div className="flex flex-col gap-6 rounded-lg border bg-muted/30 p-4">
-          <div className="space-y-1">
-            <p className="text-sm font-semibold text-foreground">Informasi Kendaraan</p>
-            <FieldDescription>Lini produk dan model kendaraan yang bermasalah.</FieldDescription>
-          </div>
+        <FieldSet className="gap-4 rounded-lg border bg-muted/30 p-4">
+          <FieldLegend>Informasi Kendaraan</FieldLegend>
+          <FieldDescription>Lini produk dan model kendaraan yang bermasalah.</FieldDescription>
           <FieldGroup className="grid gap-4 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="productLine">Lini Produk (Product Line)</FieldLabel>
               <Select
                 value={formData.productLine || null}
                 onValueChange={(v) => v && setField('productLine', v)}
-                items={availableProductLines.map((c) => ({ value: c, label: c }))}
+                items={availableProductLines.map((g) => ({ value: g.code as string, label: g.name }))}
               >
                 <SelectTrigger id="productLine" className="w-full">
                   <SelectValue
                     placeholder={
-                      availableProductLines.length > 0 ? 'Pilih Lini Produk' : 'Memuat lini produk...'
+                      availableProductLines.length > 0
+                        ? 'Pilih Lini Produk'
+                        : groupsLoaded
+                          ? 'Gagal memuat grup, refresh halaman'
+                          : 'Memuat lini produk...'
                     }
                   />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    {availableProductLines.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
+                    {availableProductLines.map((g) => (
+                      <SelectItem key={g.code} value={g.code as string}>
+                        {g.name}
                       </SelectItem>
                     ))}
                     {availableProductLines.length === 0 && (
                       <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                        Memuat lini produk...
+                        {groupsLoaded ? 'Gagal memuat grup, refresh halaman.' : 'Memuat lini produk...'}
                       </div>
                     )}
                   </SelectGroup>
@@ -1398,55 +1441,13 @@ export default function CreateReportPage() {
               />
             </Field>
           </FieldGroup>
-        </div>
+        </FieldSet>
       )}
 
       <FieldSet>
         <FieldLegend>Lampiran (Opsional)</FieldLegend>
         <FieldDescription>Tambahkan foto atau dokumen pendukung laporan.</FieldDescription>
-        <div className="rounded-lg border border-dashed p-6 text-center">
-          <UploadCloud className="mx-auto mb-2 size-8 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">Seret & lepas file di sini atau klik untuk memilih</p>
-          <input
-            type="file"
-            multiple
-            onChange={(e) => {
-              handleFileUpload(e);
-              e.target.value = '';
-            }}
-            className="hidden"
-            id="file-upload"
-          />
-          <label htmlFor="file-upload">
-            <Button variant="outline" size="sm" className="mt-2" asChild>
-              <span>Pilih File</span>
-            </Button>
-          </label>
-          {attachments.length > 0 && (
-            <div className="mt-3 space-y-2">
-              {attachments.map((file, idx) => (
-                <div
-                  key={`${file.name}-${idx}`}
-                  className="flex items-center justify-between gap-2 rounded-md border bg-background px-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{file.name}</p>
-                    <p className="text-xs text-muted-foreground">{formatFileSize(file.size)}</p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Hapus lampiran ${file.name}`}
-                    onClick={() => removeAttachment(idx)}
-                  >
-                    <XIcon className="size-4" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <FileDropzone files={attachments} onFilesChange={setAttachments} />
       </FieldSet>
 
       <FieldSet>
@@ -1519,7 +1520,7 @@ export default function CreateReportPage() {
           )}
         </FieldGroup>
       </FieldSet>
-    </FieldSet>
+    </FieldGroup>
   );
 
   // Step: Relasi Tiket
@@ -1604,14 +1605,13 @@ export default function CreateReportPage() {
             </Field>
           </FieldGroup>
         )}
-
       </FieldGroup>
     </FieldSet>
   );
 
   // Step: Konfirmasi Data
   const renderConfirmationStep = () => (
-    <FieldSet className="space-y-8">
+    <FieldGroup className="gap-8">
       {/* Detail Pengajuan */}
       <FieldSet>
         <FieldLegend>Detail Pengajuan</FieldLegend>
@@ -1707,7 +1707,7 @@ export default function CreateReportPage() {
           <FieldGroup className="grid gap-4 sm:grid-cols-2">
             <Field>
               <FieldDescription>Lini Produk (Product Line)</FieldDescription>
-              <p className="text-sm font-medium">{formData.productLine}</p>
+              <p className="text-sm font-medium">{productLineName(formData.productLine)}</p>
             </Field>
             <Field>
               <FieldDescription>Model Kendaraan</FieldDescription>
@@ -1814,33 +1814,12 @@ export default function CreateReportPage() {
       {attachments.length > 0 && (
         <FieldSet>
           <FieldLegend>Lampiran</FieldLegend>
-          <div className="space-y-2">
-            {attachments.map((file, idx) => (
-              <div
-                key={`${file.name}-${idx}`}
-                className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{file.name}</p>
-                  <p className="text-xs text-muted-foreground">{formatFileSize(file.size)}</p>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Hapus lampiran ${file.name}`}
-                  onClick={() => removeAttachment(idx)}
-                >
-                  <XIcon className="size-4" />
-                </Button>
-              </div>
-            ))}
-          </div>
+          <LocalAttachmentList files={attachments} onRemove={removeAttachment} size="sm" />
         </FieldSet>
       )}
 
       <FieldDescription>Pastikan data di atas sudah benar sebelum dikirim ke sistem.</FieldDescription>
-    </FieldSet>
+    </FieldGroup>
   );
 
   const renderStep = () => {
@@ -1929,7 +1908,8 @@ export default function CreateReportPage() {
             </CardTitle>
             {formData.ticketType && (
               <Badge variant="secondary">
-                {TICKET_TYPES.find((t) => t.value === formData.ticketType)?.label}
+                {ticketTypeOptions.find((t) => t.code === formData.ticketType)?.name ??
+                  formData.ticketType}
               </Badge>
             )}
           </div>
@@ -1944,26 +1924,23 @@ export default function CreateReportPage() {
             variant="outline"
             onClick={handlePrev}
             disabled={step === 0 || submitting}
-            className="gap-1.5"
           >
-            <ArrowLeft className="size-4" /> Kembali
+            <ArrowLeft data-icon="inline-start" />
+            Kembali
           </Button>
           <div className="flex gap-2">
-            <Button
-              type="button"
-              onClick={handleNext}
-              disabled={submitting}
-              className="gap-1.5"
-            >
+            <Button type="button" onClick={handleNext} disabled={submitting}>
               {submitting ? (
                 <>
-                  <Loader2 className="size-4 animate-spin" /> Mengirim...
+                  <Spinner data-icon="inline-start" />
+                  Mengirim...
                 </>
               ) : isLastStep ? (
                 'Kirim Laporan'
               ) : (
                 <>
-                  Lanjut <ArrowRight className="size-4" />
+                  Lanjut
+                  <ArrowRight data-icon="inline-end" />
                 </>
               )}
             </Button>

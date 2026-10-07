@@ -105,10 +105,23 @@ export function priorityLabelFromCode(code: string | null | undefined): string {
   return code ? (PRIORITY_LABEL_BY_CODE[code] ?? code) : 'Belum ditentukan';
 }
 
+/**
+ * Penjelasan singkat setiap tingkat prioritas, ditampilkan di halaman review
+ * (di bawah dropdown dan di tampilan read-only).
+ *
+ * PENTING: urutan tier di sini harus sama persis dengan `PRIORITY_OPTIONS`
+ * dan `title` di `StatusBadge` → A = Tinggi, B = Normal, C = Rendah.
+ * Versi sebelumnya tertinggal satu tingkat (B ditulis "perhatian tinggi",
+ * C ditulis "prioritas normal"), jadi chip badge yang mengetik tooltip
+ * "Prioritas B - Normal" bertentangan dengan kalimat di bawahnya.
+ *
+ * Ditulis tanpa mengulang nama tier agar tetap enak dibaca di dua konteks:
+ * sendirian di bawah dropdown, maupun dirangkai jadi "A — {deskripsi}".
+ */
 export const PRIORITY_INFO: Record<string, string> = {
-  A: 'Tiket ini membutuhkan perhatian segera.',
-  B: 'Tiket ini membutuhkan perhatian tinggi.',
-  C: 'Tiket ini dapat ditangani dengan prioritas normal.',
+  A: 'Memerlukan penanganan dan penyelesaian segera.',
+  B: 'Ditangani sesuai urutan dan kriteria operasional standar.',
+  C: 'Dapat dijadwalkan dan ditangani setelah prioritas utama selesai.',
 };
 
 export const DISTRIBUTION_CATEGORY = 'Klaim Distribusi & Pengiriman';

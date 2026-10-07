@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import type { ColumnVisibilityState } from '@tanstack/react-table';
 import Link from 'next/link';
 import {
   getAdminTicketHistory,
@@ -10,40 +11,47 @@ import { getMasterDataAll } from '@/lib/api/master';
 import { getAdminEmployees } from '@/lib/api/admin-employees';
 import type { Ticket } from '@/lib/types/ticket';
 import { StatusBadge, TypeBadge, PriorityBadge } from '@/components/shared/StatusBadge';
-import { StatisticsCard } from '@/components/shared/StatisticsCard';
 import { TableToolbar, type TableFilterValues } from '@/components/shared/TableToolbar';
+import { useMasterOptions } from '@/hooks/use-master-options';
+import { DataTable, createColumnHelper, type ColumnDef } from '@/components/shared/DataTable';
+import type { DataTableFeatures } from '@/components/shared/data-table-features';
+import { DataTablePagination } from '@/components/shared/DataTablePagination';
+import { TableSkeleton } from '@/components/shared/TableSkeleton';
+import { ColumnToggle } from '@/components/shared/ColumnToggle';
+import { StatisticsCard } from '@/components/shared/StatisticsCard';
 import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
-  Pagination, PaginationContent, PaginationEllipsis,
-  PaginationItem, PaginationLink, PaginationNext, PaginationPrevious,
-} from '@/components/ui/pagination';
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
+import { Button } from '@/components/ui/button';
 import { Inbox, ArrowUpRight, CheckCircle2, Clock3 } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
-const ITEMS_PER_PAGE = 20;
-
-function getPaginationItems(currentPage: number, totalPages: number): (number | 'ellipsis')[] {
-  const items: (number | 'ellipsis')[] = [];
-  if (totalPages <= 5) {
-    for (let i = 1; i <= totalPages; i++) items.push(i);
-  } else if (currentPage <= 3) {
-    items.push(1, 2, 3, 'ellipsis', totalPages);
-  } else if (currentPage >= totalPages - 2) {
-    items.push(1, 'ellipsis', totalPages - 2, totalPages - 1, totalPages);
-  } else {
-    items.push(1, 'ellipsis', currentPage - 1, currentPage, currentPage + 1, 'ellipsis', totalPages);
-  }
-  return items;
-}
+const columnHelper = createColumnHelper<DataTableFeatures, Ticket>();
 
 export default function AdminTicketHistoryPage() {
   const [search, setSearch] = useState('');
   const [filterValues, setFilter] = useState<TableFilterValues>({});
+  // Label pendek ("A (Tinggi)") dipertahankan — sama dengan sebelumnya.
+  const { priorities, ticketTypes } = useMasterOptions();
+  const priorityOptions = useMemo(
+    () => priorities.map((p) => ({ value: p.code, label: `${p.code} (${p.name})` })),
+    [priorities]
+  );
+  const typeOptions = useMemo(
+    () => ticketTypes.map((t) => ({ value: t.code, label: t.name })),
+    [ticketTypes]
+  );
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   const [currentPage, setCurrentPage] = useState(1);
+  const [perPage, setPerPage] = useState(20);
+  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>({});
   const [loading, setLoading] = useState(true);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [lastPage, setLastPage] = useState(1);
@@ -91,7 +99,7 @@ export default function AdminTicketHistoryPage() {
       setLoading(true);
       try {
         const params: AdminTicketHistoryParams = {
-          per_page: ITEMS_PER_PAGE,
+          per_page: perPage,
           page: currentPage,
           withSummary: true,
         };
@@ -130,7 +138,66 @@ export default function AdminTicketHistoryPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [search, filterValues, dateRange, currentPage]);
+  }, [search, filterValues, dateRange, currentPage, perPage]);
+
+  const columns: ColumnDef<DataTableFeatures, Ticket>[] = columnHelper.columns([
+    columnHelper.accessor('id', {
+      header: 'ID Tiket',
+      cell: ({ row }) => (
+        <span className="font-mono text-xs whitespace-nowrap">{row.original.id}</span>
+      ),
+    }),
+    columnHelper.accessor('subject', {
+      header: 'Subjek',
+      cell: ({ row }) => (
+        <div className="max-w-[240px] space-y-0.5">
+          <p className="truncate text-sm font-medium">{row.original.subject}</p>
+          <p className="truncate text-xs text-muted-foreground">SO: {row.original.soNumber ?? '-'}</p>
+        </div>
+      ),
+    }),
+    columnHelper.accessor('reporterName', {
+      header: 'Pelapor',
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
+          <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted/50 text-xs font-medium">
+            {row.original.reporterName.slice(0, 1)}
+          </div>
+          <span className="text-sm">{row.original.reporterName}</span>
+        </div>
+      ),
+    }),
+    columnHelper.display({
+      id: 'tipe',
+      header: 'Tipe',
+      cell: ({ row }) => <TypeBadge ticketType={row.original.ticketType} />,
+    }),
+    columnHelper.display({
+      id: 'prioritas',
+      header: 'Prioritas',
+      cell: ({ row }) => <PriorityBadge priority={row.original.priority} />,
+    }),
+    columnHelper.display({
+      id: 'status',
+      header: 'Status',
+      cell: ({ row }) => <StatusBadge status={row.original.status} />,
+    }),
+    columnHelper.display({
+      id: 'detail',
+      header: () => <div className="text-right">Detail</div>,
+      cell: ({ row }) => (
+        <div className="text-right">
+          <Button size="sm" asChild>
+            <Link href={`/admin/ticket/history/${row.original.id}`}>
+              Detail
+              <ArrowUpRight data-icon="inline-end" />
+            </Link>
+          </Button>
+        </div>
+      ),
+      enableHiding: false,
+    }),
+  ]);
 
   const totalPages = Math.max(1, lastPage);
   const safePage = Math.min(currentPage, totalPages);
@@ -162,17 +229,8 @@ export default function AdminTicketHistoryPage() {
                 { value: 'CLOSED', label: 'Selesai' },
                 { value: 'REJECTED', label: 'Ditolak' },
               ]},
-              { key: 'priority', label: 'Prioritas', options: [
-                { value: 'A', label: 'A (Tinggi)' },
-                { value: 'B', label: 'B (Normal)' },
-                { value: 'C', label: 'C (Rendah)' },
-              ]},
-              { key: 'type', label: 'Tipe Tiket', options: [
-                { value: 'REQUEST', label: 'Request' },
-                { value: 'INCIDENT', label: 'Incident' },
-                { value: 'COMPLAINT', label: 'Complaint' },
-                { value: 'INQUIRY', label: 'Inquiry' },
-              ]},
+              { key: 'priority', label: 'Prioritas', options: priorityOptions },
+              { key: 'type', label: 'Tipe Tiket', options: typeOptions },
               { key: 'category', label: 'Kategori', options: categoryOptions },
               { key: 'handler', label: 'Handler', options: handlerOptions },
             ]}
@@ -180,21 +238,37 @@ export default function AdminTicketHistoryPage() {
             onFilterChange={(key, value) => { setFilter((prev) => ({ ...prev, [key]: value })); setCurrentPage(1); }}
             dateRange={dateRange}
             onDateRangeChange={(r) => { setDateRange(r); setCurrentPage(1); }}
+            action={
+              <ColumnToggle
+                columns={columns}
+                visibility={columnVisibility}
+                onVisibilityChange={setColumnVisibility}
+              />
+            }
           />
         </CardContent>
 
-
-
         {!loading && tickets.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-2 border-t py-12 text-center">
-            <Inbox className="size-8 text-muted-foreground/60" />
-            <p className="text-sm font-medium">Tidak ada tiket riwayat</p>
-            <p className="text-xs text-muted-foreground">Tiket yang selesai atau ditolak akan tampil di sini.</p>
-          </div>
+          <Empty className="border-0 py-14">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <Inbox />
+              </EmptyMedia>
+              <EmptyTitle>Tidak ada tiket riwayat</EmptyTitle>
+              <EmptyDescription>
+                Tiket yang selesai atau ditolak akan tampil di sini.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
           <>
             {/* Mobile card */}
-            <div className="md:hidden px-4 pb-4">
+            <div
+              className={cn(
+                'px-4 pb-4 transition-opacity md:hidden',
+                loading && tickets.length > 0 && 'pointer-events-none opacity-50',
+              )}
+            >
               {tickets.map((ticket) => (
                 <div key={ticket.id} className="mb-3 rounded-lg border bg-card py-4 last:mb-0">
                   <div className="px-4 space-y-2">
@@ -224,69 +298,37 @@ export default function AdminTicketHistoryPage() {
             </div>
 
             {/* Desktop table */}
-            <div className="hidden md:block">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="bg-muted/50 px-6 py-3">ID Tiket</TableHead>
-                    <TableHead className="bg-muted/50 px-6 py-3">Subjek</TableHead>
-                    <TableHead className="bg-muted/50 px-6 py-3">Pelapor</TableHead>
-                    <TableHead className="bg-muted/50 px-6 py-3">Tipe</TableHead>
-                    <TableHead className="bg-muted/50 px-6 py-3">Prioritas</TableHead>
-                    <TableHead className="bg-muted/50 px-6 py-3">Status</TableHead>
-                    <TableHead className="bg-muted/50 px-6 py-3 text-right">Detail</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {tickets.map((ticket) => (
-                    <TableRow key={ticket.id}>
-                      <TableCell className="px-6 py-3 font-mono text-xs whitespace-nowrap">{ticket.id}</TableCell>
-                      <TableCell className="px-6 py-3">
-                        <div className="max-w-[240px] space-y-0.5">
-                          <p className="truncate text-sm font-medium">{ticket.subject}</p>
-                          <p className="truncate text-xs text-muted-foreground">SO: {ticket.soNumber ?? '-'}</p>
-                        </div>
-                      </TableCell>
-                      <TableCell className="px-6 py-3 text-sm">{ticket.reporterName}</TableCell>
-                      <TableCell className="px-6 py-3"><TypeBadge ticketType={ticket.ticketType} /></TableCell>
-                      <TableCell className="px-6 py-3"><PriorityBadge priority={ticket.priority} /></TableCell>
-                      <TableCell className="px-6 py-3"><StatusBadge status={ticket.status} /></TableCell>
-                      <TableCell className="px-6 py-3 text-right">
-                        <Button variant="outline" size="sm" className="gap-1.5 text-xs" asChild>
-                          <Link href={`/admin/ticket/history/${ticket.id}`}>
-                            Detail
-                            <ArrowUpRight data-icon="inline-end" />
-                          </Link>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <div className="hidden px-4 pb-4 md:block">
+              {loading && tickets.length === 0 ? (
+                <TableSkeleton />
+              ) : (
+                <DataTable
+                  mode="server"
+                  columns={columns}
+                  data={tickets}
+                  isPending={loading}
+                  showRowNumbers
+                  rowNumberOffset={(safePage - 1) * perPage}
+                  columnVisibility={columnVisibility}
+                  onColumnVisibilityChange={setColumnVisibility}
+                  emptyText="Tidak ada tiket riwayat."
+                  footer={() => (
+                    <DataTablePagination
+                      page={safePage}
+                      lastPage={totalPages}
+                      total={total}
+                      perPage={perPage}
+                      onPageChange={goToPage}
+                      onPerPageChange={(n) => {
+                        setPerPage(n);
+                        setCurrentPage(1);
+                      }}
+                    />
+                  )}
+                />
+              )}
             </div>
           </>
-        )}
-
-        {totalPages > 1 && (
-          <div className="border-t px-6 py-4">
-            <Pagination className="mx-0 w-auto justify-end">
-              <PaginationPrevious onClick={() => goToPage(safePage - 1)} />
-              <PaginationContent>
-                {getPaginationItems(safePage, totalPages).map((item, i) =>
-                  item === 'ellipsis' ? (
-                    <PaginationItem key={`e-${i}`}><PaginationEllipsis /></PaginationItem>
-                  ) : (
-                    <PaginationItem key={item}>
-                      <PaginationLink isActive={item === safePage} onClick={() => goToPage(item as number)}>
-                        {item}
-                      </PaginationLink>
-                    </PaginationItem>
-                  )
-                )}
-              </PaginationContent>
-              <PaginationNext onClick={() => goToPage(safePage + 1)} />
-            </Pagination>
-          </div>
         )}
       </Card>
     </div>

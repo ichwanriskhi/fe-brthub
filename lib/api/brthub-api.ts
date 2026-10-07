@@ -144,12 +144,50 @@ function roleRedirectByPriority(roles: string[]): string {
 /**
  * Role pemilik sebuah path dashboard (invers ROLE_REDIRECT).
  * Dipakai saat login agar role aktif = halaman tujuan.
+ *
+ * Cocok persis dulu (`/reviewer` → reviewer), lalu prefix (`/reviewer/tiket/1`
+ * → reviewer) — `next` dari sesi habis adalah path dalam, bukan root dashboard.
  */
 export function roleFromRedirect(path: string): AppRole | null {
-  const entry = (Object.entries(ROLE_REDIRECT) as [AppRole, string][]).find(
-    ([, redirectPath]) => redirectPath === path,
-  );
-  return entry ? entry[0] : null;
+  const entries = Object.entries(ROLE_REDIRECT) as [AppRole, string][];
+  const exact = entries.find(([, redirectPath]) => redirectPath === path);
+  if (exact) return exact[0];
+  return entries.find(([, base]) => path.startsWith(`${base}/`))?.[0] ?? null;
+}
+
+/**
+ * Halaman auth yang tidak boleh menjadi tujuan `next` — kembali ke sana sama
+ * dengan tidak pergi ke mana-mana (atau loop).
+ */
+const AUTH_PAGES = ['/login', '/verifikasi', '/otp', '/set-password', '/unauthorized'];
+
+/**
+ * Tujuan akhir setelah login staff: hormati `?next=` bila valid, fallback ke
+ * role default.
+ *
+ * Aturan `next` yang valid (anti open-redirect + anti lintas-role):
+ * - path absolut (`/…`), bukan `//…` (protocol-relative) atau URL penuh;
+ * - bukan halaman auth itu sendiri;
+ * - pemilik path (prefix `/reviewer`, `/admin`, …) harus dimiliki user —
+ *   selebihnya kembali ke role default, bukan `/unauthorized`, agar login
+ *   yang sah tidak berakhir di halaman error.
+ */
+export function resolveStaffDestination(
+  roles: string[],
+  preferredRole: string | null | undefined,
+  next: string | null | undefined,
+): string {
+  const fallback = resolveRoleRedirect(roles, preferredRole);
+
+  if (!next || !next.startsWith('/') || next.startsWith('//')) return fallback;
+  if (AUTH_PAGES.some((p) => next === p || next.startsWith(`${p}/`))) return fallback;
+
+  const owner = (Object.entries(ROLE_REDIRECT) as [AppRole, string][]).find(
+    ([, base]) => next === base || next.startsWith(`${base}/`),
+  )?.[0];
+  if (!owner || !roles.includes(owner)) return fallback;
+
+  return next;
 }
 
 // ─── API client ───────────────────────────────────────────────────────────────
@@ -232,9 +270,13 @@ export const brthubApi = {
   },
 
   /**
-   * Logout — revoke token on the server.
+   * Logout - revoke token on the server.
+   *
+   * `skipAuthRefresh`: niatnya keluar, bukan perpanjang sesi. Tanpa ini,
+   * klik Keluar saat access mati memicu refresh dulu — bila refresh gagal,
+   * user mendapat hard-redirect "sesi habis" padahal maunya logout biasa.
    */
   async logout(): Promise<void> {
-    await post('/auth/logout', {});
+    await post('/auth/logout', {}, undefined, { skipAuthRefresh: true });
   },
 };

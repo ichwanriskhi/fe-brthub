@@ -30,12 +30,25 @@ export interface PositionEntry extends MasterDataEntry {
   code: string;
 }
 
-export interface ProductLineEntry extends MasterDataEntry {
-  productCode: string;
-  description?: string;
+export interface ActionEntry extends MasterDataEntry {
+  actionCode: string;
 }
 
-export type MasterDataType = 'category' | 'department' | 'position' | 'productLine';
+export interface PriorityEntry extends MasterDataEntry {
+  priorityCode: string;
+}
+
+export interface TicketTypeEntry extends MasterDataEntry {
+  ticketTypeCode: string;
+}
+
+export type MasterDataType =
+  | 'category'
+  | 'department'
+  | 'position'
+  | 'action'
+  | 'priority'
+  | 'ticketType';
 
 export type AccountStatus = 'ACTIVE' | 'NOT_ACTIVATED' | 'NO_ACCOUNT';
 

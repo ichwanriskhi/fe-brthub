@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
@@ -11,10 +12,23 @@ import { ModeToggle } from '@/components/shared/ModeToggle';
 import { ArrowLeft, Mail, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 import { authServiceClient } from '@/lib/api/auth-service';
+import { SESSION_EXPIRED_FLAG } from '@/lib/api/fetch-wrapper';
 
 function VerifikasiForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  // Flag dipasang fetch-wrapper sebelum hard-redirect (lihat halaman login).
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(SESSION_EXPIRED_FLAG)) {
+        sessionStorage.removeItem(SESSION_EXPIRED_FLAG);
+        toast.error('Sesi Anda telah habis. Silakan login kembali.');
+      }
+    } catch {
+      // Storage tidak tersedia — abaikan.
+    }
+  }, []);
 
   // mode=staff → karyawan login (hanya akun terdaftar), mode lainnya → reporter/guest
   const mode = searchParams.get('mode') ?? 'reporter';
@@ -120,6 +134,7 @@ function VerifikasiForm() {
 
                   <Field>
                     <Button type="submit" disabled={isLoading} className="w-full">
+                      {isLoading && <Spinner data-icon="inline-start" />}
                       {isLoading ? 'Mengirim Kode...' : 'Kirim Kode OTP'}
                     </Button>
                   </Field>
@@ -133,7 +148,7 @@ function VerifikasiForm() {
                   onClick={() => setIsEmail(true)}
                   className="flex-1"
                 >
-                  <Mail className="size-4" />
+                  <Mail data-icon="inline-start" />
                   Email
                 </Button>
                 <Button
@@ -142,7 +157,7 @@ function VerifikasiForm() {
                   onClick={() => setIsEmail(false)}
                   className="flex-1"
                 >
-                  <Smartphone className="size-4" />
+                  <Smartphone data-icon="inline-start" />
                   Phone
                 </Button>
               </div>

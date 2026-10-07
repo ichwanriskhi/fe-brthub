@@ -6,10 +6,10 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from '@/components/ui/dialog';
 import { ClaimItemsTable } from '@/components/shared/ClaimItemsTable';
-import { StatusBadge, TypeBadge, PriorityBadge } from '@/components/shared/StatusBadge';
+import { AttachmentList } from '@/components/shared/AttachmentList';
+import { useItemGroupName } from '@/hooks/use-item-groups';
 import {
   User,
   Building2,
@@ -47,6 +47,8 @@ function SectionHeader({ icon: Icon, title }: { icon: React.ElementType; title: 
 
 export function ReportDetailModal({ ticket, open, onOpenChange }: ReportDetailModalProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  // productLine menyimpan KODE grup — tampilkan namanya, fallback kode mentah.
+  const productLineName = useItemGroupName(ticket.productLine);
 
   // Reset scroll to top every time modal opens.
   // setTimeout defers until after the Dialog's focus management has run,
@@ -126,7 +128,7 @@ export function ReportDetailModal({ ticket, open, onOpenChange }: ReportDetailMo
               {ticket.salesName && <Field label="Sales" value={ticket.salesName} />}
               <Field label="Kategori" value={ticket.category} />
               <Field label="Sub Kategori" value={ticket.subcategory} />
-              {ticket.productLine && <Field label="Lini Produk" value={ticket.productLine} />}
+              {ticket.productLine && <Field label="Lini Produk" value={productLineName || ticket.productLine} />}
               {ticket.vehicleModel && <Field label="Kendaraan" value={ticket.vehicleModel} />}
               {ticket.handlerName && <Field label="Handler" value={ticket.handlerName} />}
               {ticket.assignedUnit && <Field label="Unit" value={ticket.assignedUnit} />}
@@ -153,21 +155,7 @@ export function ReportDetailModal({ ticket, open, onOpenChange }: ReportDetailMo
           {ticket.attachments.length > 0 && (
             <div className="px-4 sm:px-5 py-3 sm:py-4 space-y-2">
               <SectionHeader icon={Paperclip} title={`Lampiran (${ticket.attachments.length})`} />
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {ticket.attachments.map((att) => (
-                  <a
-                    key={att.id}
-                    href={att.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-sm hover:bg-accent transition-colors"
-                  >
-                    <Paperclip className="size-3.5 text-muted-foreground shrink-0" />
-                    <span className="flex-1 truncate font-medium">{att.name}</span>
-                    <span className="text-xs text-muted-foreground shrink-0">{att.size}</span>
-                  </a>
-                ))}
-              </div>
+              <AttachmentList items={ticket.attachments} layout="grid" />
             </div>
           )}
         </div>

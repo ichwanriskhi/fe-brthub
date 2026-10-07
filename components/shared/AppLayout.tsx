@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import {
   SidebarProvider,
   Sidebar,
@@ -80,14 +80,21 @@ export interface AppLayoutProps {
    * Optional custom breadcrumb logic. If omitted, a generic breadcrumb is
    * rendered from routeLabels.
    */
-  renderBreadcrumb?: (pathname: string) => React.ReactNode;
+  /**
+   * Parameter kedua berisi query string aktif.
+   *
+   * `usePathname()` tidak menyertakan query string, padahal beberapa halaman
+   * list menunjuk ke route detail yang sama dari daftar berbeda dan menandainya
+   * lewat `?from=`. Tanpa parameter ini, breadcrumb tidak bisa tahu asal
+   * pengguna dan selalu menunjuk ke satu daftar yang sama.
+   */
+  renderBreadcrumb?: (pathname: string, searchParams: URLSearchParams) => React.ReactNode;
 }
 
 // ─── ProfileDropdown ─────────────────────────────────────────────────────────
 
 function ProfileDropdown() {
   const { user, initials, logout, availableRoles, activeRole, setActiveRole } = useAuth();
-  const router = useRouter();
 
   const ROLE_LABELS: Record<string, string> = {
     reviewer: 'Reviewer',
@@ -123,7 +130,7 @@ function ProfileDropdown() {
     <>
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<Button variant="ghost" size="icon" className="relative rounded-full hover:bg-transparent" />}
+        render={<Button variant="ghost" size="icon" className="relative rounded-full hover:bg-transparent" aria-label="Menu akun" />}
       >
         <Avatar>
           <AvatarFallback>{initials}</AvatarFallback>
@@ -262,6 +269,10 @@ export function AppLayout({
   renderBreadcrumb,
 }: AppLayoutProps) {
   const pathname = usePathname();
+  // Query string aktif, diteruskan ke `renderBreadcrumb` supaya breadcrumb bisa
+  // tahu dari daftar mana pengguna datang (`?from=`). `usePathname()` sendiri
+  // tidak memuat query string.
+  const searchParams = useSearchParams();
 
   // Mobile topbar label = last breadcrumb item
   const segments = pathname.split('/').filter(Boolean);
@@ -290,10 +301,7 @@ export function AppLayout({
                       className="size-full object-contain"
                     />
                   </div>
-                  <div className="flex flex-col items-start">
-                    <span className="text-lg font-semibold text-nowrap">BRTHub</span>
-                    <span className="text-xs font-light text-nowrap">Approval &amp; Ticketing System</span>
-                  </div>
+                  <span className="text-base font-semibold text-nowrap">BRTHub</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -302,9 +310,7 @@ export function AppLayout({
           <SidebarContent>
             {navGroups.map((group) => (
               <SidebarGroup key={group.label}>
-                <SidebarGroupLabel className="text-sidebar-foreground/50 tracking-wider uppercase">
-                  {group.label}
-                </SidebarGroupLabel>
+                <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
                 <SidebarGroupContent>
                   <SidebarMenu>
                     {group.items.map((item) => {
@@ -319,13 +325,12 @@ export function AppLayout({
                           <SidebarMenuButton
                             isActive={isActive}
                             tooltip={item.label}
-                            className="data-active:bg-primary/10! data-active:text-primary!"
                             render={<Link href={item.href} />}
                           >
                             <Icon />
                             <span className="min-w-0 flex-1 truncate">{item.label}</span>
                             {count > 0 && (
-                              <SidebarMenuBadge className="bg-primary/10 rounded-full px-1.5 font-normal">
+                              <SidebarMenuBadge className="rounded-full bg-muted px-1.5 font-normal group-data-active/menu-button:bg-primary/10">
                                 {count}
                               </SidebarMenuBadge>
                             )}
@@ -351,7 +356,7 @@ export function AppLayout({
                   className="hidden h-4! data-vertical:self-center sm:block"
                 />
                 {renderBreadcrumb ? (
-                  renderBreadcrumb(pathname)
+                  renderBreadcrumb(pathname, searchParams)
                 ) : (
                   <GenericBreadcrumb pathname={pathname} routeLabels={routeLabels} />
                 )}
@@ -363,10 +368,9 @@ export function AppLayout({
                 <div className="hidden md:block">
                   <TopbarClock />
                 </div>
-                <Button variant="ghost" size="icon-lg" className="relative">
-                  <Bell className="size-[1.2rem]" />
+                <Button variant="ghost" size="icon-lg" className="relative" aria-label="Notifikasi">
+                  <Bell />
                   <span className="absolute right-2 top-2 size-2 rounded-full bg-primary" />
-                  <span className="sr-only">Notifikasi</span>
                 </Button>
                 <ModeToggle />
                 <ProfileDropdown />

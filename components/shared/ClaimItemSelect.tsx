@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronsUpDown, Loader2, Search } from 'lucide-react';
+import { Check, ChevronsUpDown, Plus, Search } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import type { SapOrderItem, SapMasterItem, SapMasterItemsResponse } from '@/lib/api/sap';
@@ -13,8 +14,11 @@ interface ClaimItemSelectProps {
   items: SapOrderItem[] | SapMasterItem[];
   /** Kode barang terpilih (state form). */
   value: string;
-  /** Dipanggil dengan (kode, nama) barang terpilih. */
-  onValueChange: (code: string, name: string) => void;
+  /**
+   * Dipanggil dengan (kode, nama) barang terpilih.
+   * `opts.isCustom` true bila nilai berasal dari ketikan bebas (bukan master).
+   */
+  onValueChange: (code: string, name: string, opts?: { isCustom?: boolean }) => void;
   /** Sedang memuat data SAP untuk SO yang dipilih. */
   loading?: boolean;
   /** SO belum dipilih — dropdown dinonaktifkan. */
@@ -36,6 +40,12 @@ interface ClaimItemSelectProps {
    * nama tidak tampil dua kali.
    */
   showNameInTrigger?: boolean;
+  /**
+   * Izinkan ketikan bebas bila tidak ada hasil ("Gunakan teks ini").
+   * Untuk kasus kurang-kirim yang part number-nya tidak ada di SO/master —
+   * reviewer mengoreksi bila salah input. Default false (dropdown murni).
+   */
+  allowCustom?: boolean;
 }
 
 /**
@@ -58,6 +68,7 @@ export function ClaimItemSelect({
   onSearch,
   selectedName,
   showNameInTrigger = true,
+  allowCustom = false,
 }: ClaimItemSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -151,6 +162,21 @@ export function ClaimItemSelect({
     }
   };
 
+  // Pilih nilai ketikan bebas — kode = teksnya, nama kosong, penanda custom.
+  const selectCustom = (text: string) => {
+    onValueChange(text, '', { isCustom: true });
+    setQuery('');
+    setSearchResults([]);
+    setTruncated(false);
+    setSearchError(null);
+    setOpen(false);
+  };
+
+  // Opsi ketikan bebas: tampil bila diizinkan, ada ketikan, dan tidak sedang
+  // memuat/mencari/error. Ditaruh di atas hasil agar selalu terlihat.
+  const showCustomOption =
+    allowCustom && query.trim().length > 0 && !loading && !searching && !error && !searchError;
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -187,9 +213,9 @@ export function ClaimItemSelect({
               )}
             </span>
             {loading || searching ? (
-              <Loader2 className="size-4 shrink-0 animate-spin opacity-50" />
+              <Spinner data-icon="inline-end" className="opacity-50" />
             ) : (
-              <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
+              <ChevronsUpDown data-icon="inline-end" className="opacity-50" />
             )}
           </Button>
         }
@@ -206,6 +232,22 @@ export function ClaimItemSelect({
           />
         </div>
         <div className="max-h-64 overflow-y-auto p-1">
+          {showCustomOption && (
+            <button
+              type="button"
+              onClick={() => selectCustom(query.trim())}
+              className="flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-accent"
+            >
+              <Plus
+                className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+              />
+              <span className="flex-1 min-w-0">
+                <span className="block truncate font-mono text-xs font-medium">
+                  Gunakan &ldquo;{query.trim()}&rdquo;
+                </span>
+              </span>
+            </button>
+          )}
           {error ? (
             <p className="px-3 py-6 text-center text-sm text-destructive">{error}</p>
           ) : searchError ? (
@@ -269,7 +311,7 @@ export function ClaimItemSelect({
         </div>
         {mode === 'master' && truncated && !!query.trim() && searchResults.length > 0 && (
           <div className="border-t px-3 py-1.5 text-center text-xs text-muted-foreground">
-            Menampilkan {searchResults.length} hasil pertama — persempit pencarian Anda.
+            Menampilkan {searchResults.length} hasil pertama - persempit pencarian Anda.
           </div>
         )}
       </PopoverContent>

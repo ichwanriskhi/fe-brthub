@@ -6,6 +6,7 @@ import Script from 'next/script';
 import './globals.css';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { MediaLightboxProvider } from '@/components/shared/MediaLightbox';
 import SessionExpiryHandler from '@/components/shared/SessionExpiryHandler';
 
 const geistSans = Geist({
@@ -35,9 +36,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider>
           <AuthProvider>
             <TooltipProvider>
-              {children}
-              <Toaster />
-              <SessionExpiryHandler />
+              <MediaLightboxProvider>
+                {children}
+                <Toaster />
+                <SessionExpiryHandler />
+              </MediaLightboxProvider>
             </TooltipProvider>
           </AuthProvider>
         </ThemeProvider>

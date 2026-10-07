@@ -1,12 +1,11 @@
 'use client';
 
 import { use, useEffect, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { getMyTicket, submitReview } from '@/lib/api/tickets';
-import type { Ticket, TicketItemClaim, TicketPriority, TicketType } from '@/lib/types/ticket';
-import type { SapMasterItem, SapOrderItem } from '@/lib/api/sap';
-import { loadSapOrderItems, searchSapMasterItems } from '@/lib/api/sap';
+import type { Ticket, TicketItemClaim } from '@/lib/types/ticket';
+import type { SapOrderItem } from '@/lib/api/sap';
+import { loadSapOrderItems, searchSapMasterItems, getItemGroups } from '@/lib/api/sap';
 import { SoCombobox } from '@/components/shared/SoCombobox';
 import { ClaimItemSelect } from '@/components/shared/ClaimItemSelect';
 import { record } from '@/lib/utils/record';
@@ -22,37 +21,35 @@ import {
   WORKFLOW_OPTIONS,
   isDistributionClaim,
   PRIORITY_INFO,
-  workflowLabelFromApi,
   type WorkflowTarget,
 } from '@/lib/constants/reviewer';
-import { UserDetailModal, type UserDetailData } from '@/components/shared/UserDetailModal';
-import { StatusBadge, TypeBadge } from '@/components/shared/StatusBadge';
 import { TicketChatDrawer } from '@/components/shared/TicketChatDrawer';
+import { AttachmentList } from '@/components/shared/AttachmentList';
 import { TicketTimeline } from '@/components/shared/TicketTimeline';
+import { TicketHeader } from '@/components/shared/TicketHeader';
+import { TicketSummary } from '@/components/shared/TicketSummary';
+import { DetailList } from '@/components/shared/DetailList';
+import { DotChip } from '@/components/shared/DotChip';
+import { ChoiceList } from '@/components/shared/ChoiceList';
 import { ClaimItemsTable } from '@/components/shared/ClaimItemsTable';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { Badge } from '@/components/ui/badge';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
-  ArrowLeft,
-  FileText,
-  Paperclip,
-  CheckCircle2,
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from '@/components/ui/field';
+import {
   XCircle,
-  ShieldCheck,
-  Truck,
   Info,
-  Sparkles,
-  User,
-  Building,
-  Loader2,
   AlertCircle,
   Plus,
   Trash2,
@@ -62,50 +59,23 @@ import {
 export default function ReviewerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
+// Asal daftar untuk breadcrumb "kembali" — lihat `fromRiwayat` di bawah.
+const searchParams = useSearchParams();
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
 
-  const [userDetailOpen, setUserDetailOpen] = useState(false);
-  const [userDetailTitle, setUserDetailTitle] = useState('');
-  const [userDetailData, setUserDetailData] = useState<UserDetailData | null>(null);
-
-  const openReporterDetail = () => {
-    if (!ticket) return;
-    setUserDetailTitle('Detail Pelapor');
-    setUserDetailData({
-      name: ticket.reporterName,
-      email: ticket.reporterEmail,
-      phone: ticket.reporterPhone,
-      address: ticket.reporterAddress,
-      department: ticket.reporterDepartment,
-      position: ticket.reporterPosition,
-      isEmployee: ticket.reporterType === 'EMPLOYEE' || !!ticket.reporterDepartment,
-    });
-    setUserDetailOpen(true);
-  };
-
-  const openCustomerDetail = () => {
-    if (!ticket || !ticket.customerData) return;
-    setUserDetailTitle('Detail Customer');
-    setUserDetailData({
-      name: ticket.customerData.name,
-      email: ticket.customerData.email,
-      phone: ticket.customerData.phone,
-      address: ticket.customerData.address,
-      isEmployee: false,
-    });
-    setUserDetailOpen(true);
-  };
+  /* Detail pelapor & pelanggan ditangani TicketSummary (memiliki modalnya
+     sendiri), jadi state + handler di sini tidak dibutuhkan lagi. */
 
   // Working copy — data hasil edit reviewer
   const [subject, setSubject] = useState('');
   const [category, setCategory] = useState<string>(CATEGORIES[0]);
   const [subcategory, setSubcategory] = useState<string>(SUBCATEGORY_MAP[CATEGORIES[0]][0]);
   const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<TicketPriority | null>(null);
-  const [tipeTiket, setTipeTiket] = useState<TicketType>('COMPLAINT');
+  const [priority, setPriority] = useState<string | null>(null);
+  const [tipeTiket, setTipeTiket] = useState<string>('COMPLAINT');
   const [handlerAction, setHandlerAction] = useState<string>('');
   const [workflowTarget, setWorkflowTarget] = useState<WorkflowTarget>('Division');
   const [destinationDepartment, setDestinationDepartment] = useState<string>('');
@@ -117,10 +87,10 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
   const [sapLoading, setSapLoading] = useState(false);
   const [sapError, setSapError] = useState<string | null>(null);
   const [vehicleModel, setVehicleModel] = useState('');
-  const [productId, setProductId] = useState('');
+  const [productGroupCode, setProductGroupCode] = useState('');
   const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
   const [categoryRows, setCategoryRows] = useState<{ id: string; code: string; name: string; parentId: string | null }[]>([]);
-  const [productRows, setProductRows] = useState<{ id: string; name: string }[]>([]);
+  const [productRows, setProductRows] = useState<{ code: string; name: string }[]>([]);
   const [ticketTypeRows, setTicketTypeRows] = useState<{ id: string; code: string; name: string }[]>([]);
   const [priorityRows, setPriorityRows] = useState<{ id: string; code: string; name: string }[]>([]);
   // Master aksi handler (actions + category_actions) — sumber kebenaran daftar
@@ -156,8 +126,20 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
           })),
         );
 
-        const rawProds = Array.isArray(d?.products) ? d.products : [];
-        setProductRows(rawProds.map((x: { id: string; name: string }) => ({ id: String(x.id), name: x.name })));
+        const rawProds: { code: string; name: string }[] = [];
+        setProductRows(rawProds);
+        // Grup diambil dari endpoint SAP terpisah (bukan master/all).
+        getItemGroups()
+          .then((groups) => {
+            setProductRows(
+              groups
+                .filter((g) => g.code !== null)
+                .map((g) => ({ code: g.code as string, name: g.name }))
+            );
+          })
+          .catch(() => {
+            // Dropdown kosong — bukan hardcode.
+          });
 
         const rawTypes = Array.isArray(d?.ticketTypes) ? d.ticketTypes : [];
         setTicketTypeRows(
@@ -260,7 +242,7 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
         setPriority(data.priority);
         setTipeTiket(
           rev?.ticket_type_id
-            ? (ticketTypeRows.find((t) => t.id === rev.ticket_type_id.new)?.code as TicketType) ?? data.ticketType
+            ? (ticketTypeRows.find((t) => t.id === rev.ticket_type_id.new)?.code ?? data.ticketType)
             : data.ticketType,
         );
         setWorkflowTarget((data.approvalTarget as WorkflowTarget) ?? 'Division');
@@ -277,8 +259,10 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
             ? String(vehicleDiff.vehicle_model.new)
             : data.vehicleModel ?? '',
         );
-        setProductId(
-          vehicleDiff.product_id?.new != null ? String(vehicleDiff.product_id.new) : data.productId ?? '',
+        setProductGroupCode(
+          vehicleDiff.group_code?.new != null
+            ? String(vehicleDiff.group_code.new)
+            : (data.productLine ?? ''),
         );
         setSoNumber(
           salesDiff.so_number?.new != null ? String(salesDiff.so_number.new) : data.soNumber ?? '',
@@ -417,7 +401,7 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
       },
       vehicle_detail: {
         vehicle_model: vehicleModel.trim() || undefined,
-        product_id: productId || undefined,
+        group_code: productGroupCode || undefined,
       },
       claimed_items: claimedItems.length > 0 ? claimedItems : undefined,
     };
@@ -454,7 +438,7 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
         action_id: handlerAction || undefined,
         revisions: Object.keys(revisions).length > 0 ? revisions : undefined,
       });
-      toast.success(`Tinjauan awal disimpan — tiket diteruskan ke ${workflowTarget}.`);
+      toast.success(`Tinjauan awal disimpan - tiket diteruskan ke ${workflowTarget}.`);
       setTimeout(() => router.push('/reviewer/tinjauan-awal'), 1500);
     } catch (error: unknown) {
       setSubmitError(error instanceof Error ? error.message : 'Gagal mengirim hasil review.');
@@ -514,6 +498,10 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
   // Opsi aksi handler: join matrix master (category_actions × actions) ke
   // subkategori terpilih berdasarkan ID kategori — bukan pencocokan nama
   // string yang rapuh kapitalisasi ("Salah kirim" vs "Salah Kirim").
+  //
+  // Yang `is_recommended` diangkat ke atas supaya reviewer tidak perlu
+  // memindai seluruh daftar; sort stabil jadi urutan matriks di dalam tiap
+  // kelompok tetap dipertahankan.
   const availableActions = categoryActionRows
     .filter((ca) => ca.categoryId === selectedSubcategoryRow?.id)
     .flatMap((ca) => {
@@ -528,7 +516,8 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
             },
           ]
         : [];
-    });
+    })
+    .sort((a, b) => Number(b.isRecommended) - Number(a.isRecommended));
   const recommendedAction = availableActions.find((a) => a.isRecommended) ?? null;
 
   if (isLoading || !ticket) {
@@ -549,154 +538,89 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
    */
   const readOnly = ticket.status !== 'OPEN';
 
+  /**
+   * Ke daftar mana tombol "kembali" harus pergi.
+   *
+   * Halaman ini dilayani oleh DUA daftar — `/reviewer/tinjauan-awal` dan
+   * `/reviewer/riwayat` — yang keduanya menunjuk ke route yang sama. Tanpa
+   * penanda asal, breadcrumb selalu menunjuk ke Tinjauan Awal sehingga dibuka
+   * dari Arsip & Riwayat, tombolnya melompat ke daftar yang salah.
+   *
+   * Penandanya datang dari query `?from=` yang ditempel link list. Kalau
+   * URL dibuka langsung tanpa penanda, ditebak dari status tiket: yang masih
+   * OPEN memang milik antrean tinjauan, selebihnya sudah riwayat.
+   */
+  const fromRiwayat =
+    searchParams.get('from') === 'riwayat' ||
+    (searchParams.get('from') === null && readOnly);
+
   return (
     <div className="space-y-6">
-      {/* Top Bar */}
-      <div className="flex items-center justify-between gap-4">
-        <Button variant="ghost" size="sm" asChild className="gap-2 text-muted-foreground hover:text-foreground">
-          <Link href="/reviewer/tinjauan-awal">
-            <ArrowLeft className="size-4" />
-            <span>Kembali</span>
-          </Link>
-        </Button>
+      {/* Header halaman — di luar Card supaya judul/badan/aksi tidak menumpuk */}
+      <TicketHeader
+        ticket={{ ...ticket, subject: subject || ticket.subject }}
+        backHref={fromRiwayat ? '/reviewer/riwayat' : '/reviewer/tinjauan-awal'}
+        backLabel={fromRiwayat ? 'Kembali ke Arsip & Riwayat' : 'Kembali ke Tinjauan Awal'}
+        actions={
+          <TicketChatDrawer ticketId={ticket.id} open={chatOpen} onOpenChange={setChatOpen} />
+        }
+      />
 
-        <TicketChatDrawer ticketId={ticket.id} open={chatOpen} onOpenChange={setChatOpen} />
-      </div>
+      <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* Kolom kiri (2/3): working copy + data tiket */}
+        <div className="flex min-w-0 flex-col gap-6 lg:col-span-2">
+          <TicketSummary ticket={ticket} showWansis />
 
-      {/* Ticket Brief Header */}
-      <Card>
-        <CardContent className="space-y-4 pt-6">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0 space-y-1">
-              <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
-                <span className="font-semibold text-foreground">{ticket.id}</span>
-                <span>•</span>
-                <span>{new Date(ticket.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
-              </div>
-              <h1 className="text-xl font-bold tracking-tight md:text-2xl">{subject || ticket.subject}</h1>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <TypeBadge ticketType={tipeTiket} />
-              <StatusBadge status={ticket.status} />
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-x-6 gap-y-3 border-t pt-4 text-xs text-muted-foreground">
-            <div className="flex items-center gap-1.5">
-              <User className="size-4 text-muted-foreground" />
-              <span>
-                Pelapor:{' '}
-                <button
-                  type="button"
-                  onClick={openReporterDetail}
-                  className="font-semibold text-foreground hover:underline"
-                >
-                  {ticket.reporterName}
-                </button>
-              </span>
-            </div>
-            {ticket.soNumber && (
-              <div className="flex items-center gap-1.5">
-                <FileText className="size-4 text-muted-foreground" />
-                <span>SO: <strong className="font-semibold text-foreground">{ticket.soNumber}</strong></span>
-              </div>
-            )}
-            {ticket.salesName && (
-              <div className="flex items-center gap-1.5">
-                <User className="size-4 text-muted-foreground" />
-                <span>Sales: <strong className="font-semibold text-foreground">{ticket.salesName}</strong></span>
-              </div>
-            )}
-            {ticket.productLine && (
-              <div className="flex items-center gap-1.5">
-                <Truck className="size-4 text-muted-foreground" />
-                <span>Lini Produk: <strong className="font-semibold text-foreground">{ticket.productLine}</strong></span>
-              </div>
-            )}
-            {ticket.vehicleModel && (
-              <div className="flex items-center gap-1.5">
-                <Sparkles className="size-4 text-muted-foreground" />
-                <span>Model Kendaraan: <strong className="font-semibold text-foreground">{ticket.vehicleModel}</strong></span>
-              </div>
-            )}
-            {ticket.customerData?.name && (
-              <div className="flex items-center gap-1.5">
-                <Building className="size-4 text-muted-foreground" />
-                <span>
-                  Customer:{' '}
-                  <button
-                    type="button"
-                    onClick={openCustomerDetail}
-                    className="font-semibold text-foreground hover:underline"
-                  >
-                    {ticket.customerData.name}
-                  </button>
-                </span>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 min-w-0">
-        {/* Kolom kiri: working copy + data tiket */}
-        <div className="lg:col-span-2 space-y-6 min-w-0">
           {/* Data yang bisa diedit reviewer */}
           <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                <FileText className="size-4 text-muted-foreground" />
+            <CardHeader>
+              <CardTitle className="text-base">
                 Data Laporan {readOnly ? '(Read-Only)' : '(Salinan Kerja)'}
               </CardTitle>
-              <CardDescription className="text-xs">
+              <CardDescription>
                 {readOnly
                   ? 'Tiket sudah melalui tahap review awal. Data di bawah bersifat read-only.'
                   : 'Koreksi data laporan sebelum diteruskan. Data asli pelapor tersimpan di riwayat.'}
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <label className="text-xs font-semibold text-foreground block mb-1">
-                  Subjek
-                  <span className="text-red-500 ml-0.5">*</span>
-                </label>
-                <Input value={subject} onChange={(e) => setSubject(e.target.value)} disabled={readOnly} />
-              </div>
+            {/* Samakan dengan unit: `flex flex-col gap-6` supaya jarak antar
+                blok berasal dari satu sumber. Tanpa ini tiap blok harus
+                membawa spacing sendiri, dan yang tidak membawa terlihat
+                menempel — termasuk Separator yang jadi nempel ke konten. */}
+            <CardContent className="flex flex-col gap-6">
+              <FieldGroup>
+                <Field>
+                  <FieldLabel>Subjek</FieldLabel>
+                  <Input value={subject} onChange={(e) => setSubject(e.target.value)} disabled={readOnly} />
+                </Field>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-semibold text-foreground block mb-1">
-                    Tipe Tiket
-                    <span className="text-red-500 ml-0.5">*</span>
-                  </label>
-                  <Select value={tipeTiket} onValueChange={(v) => setTipeTiket(v ?? 'COMPLAINT')} disabled={readOnly} items={[
-                    { value: 'REQUEST', label: 'Request' },
-                    { value: 'INCIDENT', label: 'Incident' },
-                    { value: 'COMPLAINT', label: 'Complaint' },
-                    { value: 'INQUIRY', label: 'Inquiry' },
-                  ]}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="REQUEST">Request</SelectItem>
-                      <SelectItem value="INCIDENT">Incident</SelectItem>
-                      <SelectItem value="COMPLAINT">Complaint</SelectItem>
-                      <SelectItem value="INQUIRY">Inquiry</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-foreground block mb-1">
-                    Kategori
-                    <span className="text-red-500 ml-0.5">*</span>
-                  </label>
-                  {readOnly ? (
-                    <Input value={ticket.category} disabled />
-                  ) : (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel>Tipe Tiket</FieldLabel>
+                    <Select
+                      value={tipeTiket}
+                      onValueChange={(v) => setTipeTiket(v ?? 'COMPLAINT')}
+                      disabled={readOnly}
+                      items={ticketTypeRows.map((t) => ({ value: t.code, label: t.name }))}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ticketTypeRows.map((t) => (
+                          <SelectItem key={t.id} value={t.code}>
+                            {t.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field>
+                    <FieldLabel>Kategori</FieldLabel>
                     <Select
                       value={category}
                       onValueChange={(v) => handleCategoryChange(v ?? CATEGORIES[0])}
+                      disabled={readOnly}
                       items={CATEGORIES.map((c) => ({ value: c, label: c }))}
                     >
                       <SelectTrigger className="w-full">
@@ -708,19 +632,13 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
                         ))}
                       </SelectContent>
                     </Select>
-                  )}
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-foreground block mb-1">
-                    Sub Kategori
-                    <span className="text-red-500 ml-0.5">*</span>
-                  </label>
-                  {readOnly ? (
-                    <Input value={ticket.subcategory} disabled />
-                  ) : (
+                  </Field>
+                  <Field>
+                    <FieldLabel>Sub Kategori</FieldLabel>
                     <Select
                       value={subcategory}
                       onValueChange={(v) => setSubcategory(v ?? subcategoryOptions[0])}
+                      disabled={readOnly}
                       items={subcategoryOptions.map((sc) => ({ value: sc, label: sc }))}
                     >
                       <SelectTrigger className="w-full">
@@ -732,40 +650,39 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
                         ))}
                       </SelectContent>
                     </Select>
-                  )}
+                  </Field>
                 </div>
-              </div>
 
-              <div>
-                <label className="text-xs font-semibold text-foreground block mb-1">
-                  Deskripsi / Ruang Lingkup
-                  <span className="text-red-500 ml-0.5">*</span>
-                </label>
-                <Textarea value={description} onChange={(e) => setDescription(e.target.value)} className="min-h-24" disabled={readOnly} />
-              </div>
+                <Field>
+                  <FieldLabel>Deskripsi / Ruang Lingkup</FieldLabel>
+                  <Textarea value={description} onChange={(e) => setDescription(e.target.value)} className="min-h-24" disabled={readOnly} />
+                </Field>
+              </FieldGroup>
 
               {/* Informasi barang claim — khusus Klaim Distribusi & Pengiriman */}
               {isClaim && (
                 <>
                   <Separator />
-                  <div className="space-y-2">
+                  <div className="flex flex-col gap-4">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold text-foreground">Data Penjualan</span>
-                      {readOnly ? null : (
-                        <span className="text-[11px] text-muted-foreground">SO & barang dapat dikoreksi reviewer</span>
+                      <p className="text-sm font-medium text-foreground">Data Penjualan</p>
+                      {!readOnly && (
+                        <p className="text-xs text-muted-foreground">
+                          SO & barang dapat dikoreksi reviewer
+                        </p>
                       )}
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs font-semibold text-foreground block mb-1">No. SO</label>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <Field>
+                        <FieldLabel>Nomor SO</FieldLabel>
                         {readOnly ? (
                           <Input value={soNumber} placeholder="Nomor Sales Order" disabled />
                         ) : (
                           <SoCombobox value={soNumber} onValueChange={handleSoChange} />
                         )}
-                      </div>
-                      <div>
-                        <label className="text-xs font-semibold text-foreground block mb-1">Nama Sales</label>
+                      </Field>
+                      <Field>
+                        <FieldLabel>Nama Sales</FieldLabel>
                         <Input
                           value={salesName}
                           placeholder="Terisi otomatis"
@@ -774,13 +691,11 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
                           className="bg-muted/40 text-muted-foreground"
                           title="Terisi otomatis dari nomor SO"
                         />
-                        <p className="mt-1 text-[11px] text-muted-foreground">
-                          Terisi otomatis dari nomor SO yang dipilih.
-                        </p>
-                      </div>
+                        <FieldDescription>Terisi otomatis dari nomor SO yang dipilih.</FieldDescription>
+                      </Field>
                     </div>
                     {sapError && !readOnly ? (
-                      <p className="text-[11px] text-destructive">{sapError}</p>
+                      <p className="text-sm text-destructive">{sapError}</p>
                     ) : null}
                   </div>
                 </>
@@ -790,28 +705,28 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
               {isVehicleCategory && (
                 <>
                   <Separator />
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-semibold text-foreground block mb-1">Lini Produk</label>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Field>
+                      <FieldLabel>Lini Produk</FieldLabel>
                       <Select
-                        value={productId}
-                        onValueChange={(v) => setProductId(v ?? '')} disabled={readOnly}
-                        items={productRows.map((p) => ({ value: p.id, label: p.name }))}
+                        value={productGroupCode}
+                        onValueChange={(v) => setProductGroupCode(v ?? '')} disabled={readOnly}
+                        items={productRows.map((p) => ({ value: p.code, label: p.name }))}
                       >
                         <SelectTrigger className="w-full">
                           <SelectValue placeholder="Pilih lini produk..." />
                         </SelectTrigger>
                         <SelectContent>
                           {productRows.map((p) => (
-                            <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                            <SelectItem key={p.code} value={p.code}>{p.name}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                    </div>
-                    <div>
-                      <label className="text-xs font-semibold text-foreground block mb-1">Model Kendaraan</label>
+                    </Field>
+                    <Field>
+                      <FieldLabel>Model Kendaraan</FieldLabel>
                       <Input value={vehicleModel} onChange={(e) => setVehicleModel(e.target.value)} placeholder="Contoh: Vario 160" disabled={readOnly} />
-                    </div>
+                    </Field>
                   </div>
                 </>
               )}
@@ -819,23 +734,20 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
               {isClaim && (claimedItems.length > 0 || !readOnly) && (
                 <>
                   <Separator />
-                  <div>
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <div className="flex items-center gap-2">
-                        <Truck className="size-4 text-primary" />
-                        <span className="text-xs font-semibold text-foreground">Informasi Barang Claim</span>
-                      </div>
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-foreground">Informasi Barang Claim</p>
                       {readOnly ? null : (
                         <Button type="button" variant="outline" size="sm" onClick={addClaimedItem}>
-                          <Plus className="size-3.5" />
-                          <span>Tambah barang</span>
+                          <Plus data-icon="inline-start" />
+                          Tambah barang
                         </Button>
                       )}
                     </div>
                     {readOnly ? (
                       <ClaimItemsTable items={claimedItems} claimConfig={claimConfig} />
                     ) : claimedItems.length === 0 ? (
-                      <p className="rounded-lg border border-dashed p-3 text-center text-xs text-muted-foreground">
+                      <p className="rounded-lg border border-dashed p-3 text-center text-sm text-muted-foreground">
                         Belum ada barang klaim — tambah via tombol di atas.
                       </p>
                     ) : (
@@ -857,226 +769,226 @@ export default function ReviewerDetailPage({ params }: { params: Promise<{ id: s
               {ticket.attachments && ticket.attachments.length > 0 && (
                 <>
                   <Separator />
-                  <div>
-                    <span className="text-xs font-semibold text-foreground block mb-2">Lampiran Pelapor</span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {ticket.attachments.map((att) => (
-                        <a key={att.id} href={att.url} target="_blank" rel="noreferrer"
-                          className="flex items-center gap-2 p-2.5 rounded-lg border bg-card hover:bg-accent transition-colors">
-                        <Paperclip className="size-4 text-primary shrink-0" />
-                        <span className="font-medium truncate flex-1 text-sm">{att.name}</span>
-                        <span className="text-[10px] text-muted-foreground">{att.size}</span>
-                        </a>
-                      ))}
-                    </div>
+                  <div className="flex flex-col gap-2">
+                    <p className="text-xs text-muted-foreground">Lampiran Pelapor</p>
+                    <AttachmentList items={ticket.attachments} layout="grid" />
                   </div>
                 </>
               )}
             </CardContent>
           </Card>
+
+          <TicketTimeline activities={ticket.activities} />
         </div>
 
-        {/* Kolom kanan: keputusan & routing */}
-        <div className="space-y-6 min-w-0">
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                <ShieldCheck className="size-4 text-primary" />
-                Prioritas & Tujuan Penerusan
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Tentukan prioritas dan tujuan penerusan tiket.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Tujuan Approval/Eskalasi */}
-              <div>
-                <label className="text-xs font-semibold text-foreground block mb-2">
-                  Tujuan Approval / Eskalasi
-                  <span className="text-red-500 ml-0.5">*</span>
-                </label>
-                <RadioGroup
-                  value={workflowTarget}
-                  onValueChange={(v) => setWorkflowTarget(v as WorkflowTarget)}
-                  className="gap-2"
-                  disabled={readOnly}
-                >
-                  {WORKFLOW_OPTIONS.map((opt) => {
-                    const selected = workflowTarget === opt.value;
-                    return (
-                      <label
-                        key={opt.value}
-                        data-checked={selected || undefined}
-                        className="flex w-full cursor-pointer flex-col rounded-lg border border-border p-3 transition-colors hover:bg-accent data-checked:border-primary data-checked:bg-primary/10 dark:border-input"
-                      >
-                        <div className="flex items-center gap-2">
-                          <RadioGroupItem value={opt.value} />
-                          <span className="text-sm font-semibold">{opt.label}</span>
-                        </div>
-                        <p className="mt-1 ml-6 text-xs text-muted-foreground">{opt.description}</p>
-                      </label>
-                    );
-                  })}
-                </RadioGroup>
-              </div>
-
-              {/* Prioritas */}
-              <div>
-                <label className="text-xs font-semibold text-foreground block mb-1">
-                  Tingkat Prioritas
-                  <span className="text-red-500 ml-0.5">*</span>
-                </label>
-                <Select
-                  value={priority ?? ''}
-                  onValueChange={(v) => setPriority(v as TicketPriority)} disabled={readOnly}
-                  items={priorityRows.map((p) => ({ value: p.code, label: `Prioritas ${p.code} (${p.name})` }))}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Pilih prioritas..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {priorityRows.map((p) => (
-                      <SelectItem key={p.id} value={p.code}>
-                        {p.code} - {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1.5">
-                  <Info className="size-3.5 shrink-0" />
-                  {priority ? PRIORITY_INFO[priority] : 'Prioritas belum ditentukan - pilih tingkat urgensi masalah.'}
-                </p>
-              </div>
-
-              {/* Unit / Departemen Tujuan (untuk ROUTE) */}
-              <div>
-                <label className="text-xs font-semibold text-foreground block mb-1">
-                  Unit / Departemen Tujuan
-                  <span className="text-red-500 ml-0.5">*</span>
-                </label>
+        {/* Kolom kanan (1/3) KHUSUS keputusan & aksi — sticky sebagai satu kesatuan.
+          Catatan: sticky hanya aman kalau isinya lebih pendek dari viewport.
+          Karena itu tiap opsi radio (Tujuan Eskalasi + Aksi Handler) memakai
+          `ChoiceList`, yang deskripsinya hanya muncul pada opsi terpilih —
+          hemat ~180px dibanding menampilkan deskripsi di semua opsi. */}
+        <div className="flex min-w-0 flex-col gap-6">
+          <div className="lg:sticky lg:top-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Keputusan & Routing</CardTitle>
+                <CardDescription>
+                  {readOnly
+                    ? 'Nilai yang sudah ditetapkan pada review awal.'
+                    : 'Tentukan prioritas dan tujuan penerusan, lalu teruskan atau tolak laporan ini.'}
+                </CardDescription>
+              </CardHeader>
+              {/* `flex flex-col gap-6` supaya jarak antar field berasal dari
+                  satu sumber. Tanpa itu, Unit Tujuan dan tombol di bawahnya
+                  menempel karena keduanya sibling dari CardContent yang
+                  `display: block` tanpa gap. */}
+              <CardContent className="flex flex-col gap-6">
                 {readOnly ? (
-                  <Input value={ticket.destinationDepartmentName || ticket.assignedUnit || '-'} disabled />
+                  /* Read-only: tampilkan sebagai data, bukan kontrol. Control
+                     disabled (Select/RadioGroup) tetap terlihat seperti opsi
+                     yang bisa diubah — itu yang dikeluhkan user. */
+                  <DetailList
+                    items={[
+                      {
+                        label: 'Tujuan Approval / Eskalasi',
+                        value:
+                          WORKFLOW_OPTIONS.find((o) => o.value === workflowTarget)?.label ?? '-',
+                      },
+                      {
+                        label: 'Tingkat Prioritas',
+                        value: priority
+                          ? `${priority} - ${PRIORITY_INFO[priority]}`
+                          : 'Belum ditentukan',
+                      },
+                      {
+                        label: 'Unit / Departemen Tujuan',
+                        value: ticket.destinationDepartmentName || ticket.assignedUnit || '-',
+                      },
+                      ...(isClaim
+                        ? [
+                            (() => {
+                              /* Mode read-only: tampilkan label + deskripsi.
+                                 Versi lama hanya menampilkan label, padahal
+                                 deskripsi menjelaskan apa yang harus dilakukan
+                                 handler. Di mode edit deskripsi itu terlihat
+                                 lewat ChoiceList; tanpa ini, begitu tiket masuk
+                                 tahap berikutnya reviewer tidak bisa lagi
+                                 membaca keputusan yang pernah diambil. */
+                              const action =
+                                availableActions.find((a) => a.id === handlerAction) ??
+                                HANDLER_ACTIONS.find((a) => a.id === handlerAction);
+                              return {
+                                label: 'Aksi untuk Handler',
+                                value: action ? (
+                                  <span className="flex flex-col gap-1">
+                                    <span>{action.label}</span>
+                                    {action.description && (
+                                      <span className="text-xs font-normal leading-relaxed text-muted-foreground">
+                                        {action.description}
+                                      </span>
+                                    )}
+                                  </span>
+                                ) : (
+                                  '-'
+                                ),
+                              };
+                            })(),
+                          ]
+                        : []),
+                    ]}
+                    columns={1}
+                  />
                 ) : (
-                  <Select
-                    value={destinationDepartment}
-                    onValueChange={(v) => setDestinationDepartment(v ?? '')}
-                    items={departments.map((d) => ({ value: d.id, label: d.name }))}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Pilih unit tujuan..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {departments.map((d) => (
-                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel>Tujuan Approval / Eskalasi</FieldLabel>
+                      <ChoiceList
+                        value={workflowTarget}
+                        onValueChange={(v) => setWorkflowTarget(v as WorkflowTarget)}
+                        options={WORKFLOW_OPTIONS.map((opt) => ({
+                          value: opt.value,
+                          label: opt.label,
+                          description: opt.description,
+                        }))}
+                      />
+                    </Field>
+
+                    <Field>
+                      <FieldLabel>Tingkat Prioritas</FieldLabel>
+                      <Select
+                        value={priority ?? ''}
+                        onValueChange={(v) => setPriority(v)}
+                        items={priorityRows.map((p) => ({ value: p.code, label: `Prioritas ${p.code} (${p.name})` }))}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Pilih prioritas..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {priorityRows.map((p) => (
+                            <SelectItem key={p.id} value={p.code}>
+                              {p.code} - {p.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FieldDescription>
+                        {priority
+                          ? PRIORITY_INFO[priority]
+                          : 'Prioritas belum ditentukan, pilih tingkat urgensi masalah.'}
+                      </FieldDescription>
+                    </Field>
+
+                    <Field>
+                      <FieldLabel>Unit / Departemen Tujuan</FieldLabel>
+                      <Select
+                        value={destinationDepartment}
+                        onValueChange={(v) => setDestinationDepartment(v ?? '')}
+                        items={departments.map((d) => ({ value: d.id, label: d.name }))}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Pilih unit tujuan..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {departments.map((d) => (
+                            <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
 
               {/* Aksi handler khusus klaim distribusi (matrix category_actions) */}
-              {isClaim && availableActions.length > 0 && (
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-foreground">Aksi untuk Handler</label>
-                  <RadioGroup value={handlerAction} onValueChange={setHandlerAction} className="gap-2" disabled={readOnly}>
-                    {availableActions.map((action) => {
-                      const selected = handlerAction === action.id;
-                      const isRecommended = recommendedAction?.id === action.id;
-                      return (
-                        <label
-                          key={action.id}
-                          data-checked={selected || undefined}
-                          className="flex w-full cursor-pointer flex-col rounded-lg border border-border p-3 transition-colors hover:bg-accent data-checked:border-primary data-checked:bg-primary/10 dark:border-input"
-                        >
-                          <div className="flex items-center gap-2">
-                            <RadioGroupItem value={action.id} />
-                            <span className="text-sm font-semibold">{action.label}</span>
-                            {isRecommended && (
-                              <Badge variant="secondary" className="gap-1">
-                                <Sparkles className="size-3" />
-                                Direkomendasikan
-                              </Badge>
-                            )}
-                          </div>
-                          <p className="mt-1 ml-6 text-xs text-muted-foreground">{action.description}</p>
-                        </label>
-                      );
-                    })}
-                  </RadioGroup>
-                  <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Sparkles className="size-3.5 shrink-0" />
-                    Rekomendasi sistem berdasarkan sub kategori terpilih.
-                  </p>
-                </div>
-              )}
+                    {isClaim && availableActions.length > 0 && (
+                      <Field>
+                        <FieldLabel>Aksi untuk Handler</FieldLabel>
+                        <ChoiceList
+                          value={handlerAction}
+                          onValueChange={setHandlerAction}
+                          options={availableActions.map((action) => ({
+                            value: action.id,
+                            label: action.label,
+                            description: action.description,
+                            trailing:
+                              recommendedAction?.id === action.id ? (
+                                <DotChip dotClass="bg-primary">Direkomendasikan</DotChip>
+                              ) : null,
+                          }))}
+                        />
+                        <FieldDescription>
+                          Rekomendasi sistem berdasarkan subkategori terpilih.
+                        </FieldDescription>
+                      </Field>
+                    )}
+                  </FieldGroup>
+                )}
 
-              {/* Ringkasan keputusan */}
-              <div className="rounded-lg border bg-muted/40 p-3 space-y-2 text-xs">
-                <div className="text-[10px] font-semibold uppercase text-muted-foreground tracking-wider">
-                  Ringkasan Keputusan
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div>
-                    <span className="block text-muted-foreground">Prioritas</span>
-                    <span className="font-semibold">{priority ?? 'Belum ditentukan'}</span>
+                {readOnly ? (
+                  <div className="mt-4 flex items-start gap-2 rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
+                    <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
+                    <span>
+                      Tiket sudah melalui tahap review awal dan sedang menunggu proses selanjutnya.
+                      Data di halaman ini bersifat read-only.
+                    </span>
                   </div>
-                  <div>
-                    <span className="block text-muted-foreground">Tujuan Eskalasi</span>
-                    <span className="font-semibold">{workflowTarget}</span>
-                  </div>
-                  {isClaim && (
-                    <div className="col-span-2">
-                      <span className="block text-muted-foreground">Aksi Handler</span>
-                      <span className="font-semibold">
-                        {availableActions.find((a) => a.id === handlerAction)?.label ??
-                          HANDLER_ACTIONS.find((a) => a.id === handlerAction)?.label ??
-                          '-'}
-                      </span>
+                ) : null}
+
+                {!readOnly && (
+                  <>
+                    <Separator />
+                    <div className="flex flex-col gap-2">
+                      {submitError && (
+                        <div className="flex items-start gap-2 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+                          <AlertCircle aria-hidden className="mt-0.5 size-4 shrink-0" />
+                          <span>{submitError}</span>
+                        </div>
+                      )}
+                      <Button
+                        className="w-full"
+                        onClick={() => setConfirmAction('route')}
+                        disabled={submitting}
+                      >
+                        {submitting ? (
+                          <Spinner data-icon="inline-start" />
+                        ) : (
+                          <Send data-icon="inline-start" />
+                        )}
+                        Teruskan Tiket
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        className="w-full"
+                        onClick={() => setConfirmAction('reject')}
+                        disabled={submitting}
+                      >
+                        <XCircle data-icon="inline-start" />
+                        Tolak
+                      </Button>
                     </div>
-                  )}
-                </div>
-              </div>
-
-              {submitError && (
-                <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">
-                  <AlertCircle className="size-4 shrink-0 mt-0.5" />
-                  <span>{submitError}</span>
-                </div>
-              )}
-
-              {readOnly ? (
-                <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-                  <Info className="size-4 shrink-0 mt-0.5" />
-                  <span>
-                    Tiket sudah melalui tahap review awal dan sedang menunggu proses selanjutnya.
-                    Data di halaman ini bersifat read-only.
-                  </span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Button onClick={() => setConfirmAction('route')} disabled={submitting} className="flex-1 text-xs font-semibold gap-2">
-                    {submitting ? <Loader2 className="size-4 animate-spin" /> : null}
-                    <span>Teruskan Tiket</span>
-                  </Button>
-                  <Button onClick={() => setConfirmAction('reject')} disabled={submitting} variant="destructive" className="text-xs font-semibold gap-2">
-                    <XCircle className="size-4" />
-                    <span>Tolak</span>
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
-
-      <TicketTimeline activities={ticket.activities} />
-
-      <UserDetailModal
-        open={userDetailOpen}
-        onOpenChange={setUserDetailOpen}
-        title={userDetailTitle}
-        user={userDetailData}
-      />
 
       {/* Konfirmasi sebelum aksi penting (ROUTE / REJECT) — validasi di dalam
           handler tetap berjalan; galat tampil di banner submitError. */}
@@ -1158,20 +1070,17 @@ function ReviewerClaimEditor({
               <span className="text-xs font-semibold">Barang {idx + 1}</span>
               <Button
                 type="button"
-                variant="ghost"
+                variant="destructive"
                 size="sm"
-                className="h-7 px-2 text-destructive hover:text-destructive"
                 onClick={() => onRemove(c.id)}
               >
-                <Trash2 className="size-3.5" />
-                <span>Hapus</span>
+                <Trash2 data-icon="inline-start" />
+                Hapus
               </Button>
             </div>
             <div className={showSecondColumn ? 'grid gap-3 sm:grid-cols-2' : 'grid gap-3'}>
-              <div>
-                <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">
-                  {label1}
-                </label>
+              <Field>
+                <FieldLabel>{label1}</FieldLabel>
                 <ClaimItemSelect
                   id={`rev-item1-${c.id}`}
                   items={sapItems}
@@ -1185,16 +1094,14 @@ function ReviewerClaimEditor({
                   placeholder="Pilih barang dari SO..."
                 />
                 {c.itemName1 ? (
-                  <p className="mt-1 truncate text-[11px] text-muted-foreground" title={c.itemName1}>
+                  <p className="mt-1 truncate text-xs text-muted-foreground" title={c.itemName1}>
                     {c.itemName1}
                   </p>
                 ) : null}
-              </div>
+              </Field>
               {showSecondColumn && (
-                <div>
-                  <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">
-                    {label2}
-                  </label>
+                <Field>
+                  <FieldLabel>{label2}</FieldLabel>
                   <ClaimItemSelect
                     id={`rev-item2-${c.id}`}
                     items={[]}
@@ -1210,31 +1117,31 @@ function ReviewerClaimEditor({
                     onSearch={searchSapMasterItems}
                   />
                   {c.itemName2 ? (
-                    <p className="mt-1 truncate text-[11px] text-muted-foreground" title={c.itemName2}>
+                    <p className="mt-1 truncate text-xs text-muted-foreground" title={c.itemName2}>
                       {c.itemName2}
                     </p>
                   ) : null}
-                </div>
+                </Field>
               )}
             </div>
             <div className="grid grid-cols-[96px_1fr] gap-2">
-              <div>
-                <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">Qty</label>
+              <Field>
+                <FieldLabel>Qty</FieldLabel>
                 <Input
                   type="number"
                   min={1}
                   value={qtyVal}
                   onChange={(e) => onUpdate(c.id, { quantity: Math.max(1, Number(e.target.value) || 1) })}
                 />
-              </div>
-              <div>
-                <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">Alasan</label>
+              </Field>
+              <Field>
+                <FieldLabel>Alasan</FieldLabel>
                 <Input
                   value={reasonVal}
                   onChange={(e) => onUpdate(c.id, { issueDescription: e.target.value, reason: e.target.value })}
                   placeholder="Alasan klaim barang ini..."
                 />
-              </div>
+              </Field>
             </div>
           </div>
         );

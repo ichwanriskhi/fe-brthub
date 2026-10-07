@@ -7,6 +7,7 @@ export default function HandlerNeedActionPage() {
     <HandlerQueue
       status="NEED_ACTION"
       hrefBase="/handler/ticket"
+      linkQuery="?from=need-action"
       actionLabel="Kerjakan"
       emptyTitle="Tidak ada tiket yang perlu ditindaklanjuti"
       emptyDescription="Semua tiket yang ditugaskan kepada Anda telah diajukan resolusinya."

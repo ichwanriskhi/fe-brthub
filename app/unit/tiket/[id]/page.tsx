@@ -1,41 +1,33 @@
 'use client';
 
 import { use, useEffect, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { getUnitTicket, getUnitEmployees, assignHandler, type UnitEmployee } from '@/lib/api/handler';
 import type { Ticket } from '@/lib/types/ticket';
-import { reporterDisplay, customerDisplayName } from '@/lib/utils/ticket-display';
-import { StatusBadge, TypeBadge, PriorityBadge } from '@/components/shared/StatusBadge';
-import { UserDetailModal, type UserDetailData } from '@/components/shared/UserDetailModal';
 import { ClaimItemsTable } from '@/components/shared/ClaimItemsTable';
-import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { TicketChatDrawer } from '@/components/shared/TicketChatDrawer';
+import { AttachmentList } from '@/components/shared/AttachmentList';
+import { TicketHeader } from '@/components/shared/TicketHeader';
+import { TicketSummary } from '@/components/shared/TicketSummary';
+import { DetailList } from '@/components/shared/DetailList';
+import { TicketTimeline } from '@/components/shared/TicketTimeline';
+import { AssignHandlerDialog } from '@/components/shared/AssignHandlerDialog';
+import { DotChip } from '@/components/shared/DotChip';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Spinner } from '@/components/ui/spinner';
 import {
-  ArrowLeft,
-  Paperclip,
-  Building,
-  FileText,
-  User,
   UserPlus,
-  ClipboardCheck,
   History,
-  Loader2,
   AlertCircle,
-  CheckCircle2,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { toast } from 'sonner';
 
 export default function UnitTicketDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const router = useRouter();
+  // Asal daftar untuk breadcrumb "kembali" — lihat `fromRiwayat` di bawah.
+  const searchParams = useSearchParams();
 
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -43,43 +35,15 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
   const [chatOpen, setChatOpen] = useState(false);
 
   const [employees, setEmployees] = useState<UnitEmployee[]>([]);
-  const [employeeLoading, setEmployeeLoading] = useState(false);
+  // Mulai dalam keadaan memuat — efek di bawah hanya menonaktifkannya, jadi
+// tidak perlu setState sinkron di dalam badan efek.
+  const [employeeLoading, setEmployeeLoading] = useState(true);
   const [selectedHandler, setSelectedHandler] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [showReplaceForm, setShowReplaceForm] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<'assign' | 'replace' | null>(null);
+  const [assignOpen, setAssignOpen] = useState(false);
 
-  const [userDetailOpen, setUserDetailOpen] = useState(false);
-  const [userDetailTitle, setUserDetailTitle] = useState('');
-  const [userDetailData, setUserDetailData] = useState<UserDetailData | null>(null);
-
-  const openReporterDetail = () => {
-    if (!ticket) return;
-    setUserDetailTitle('Detail Pelapor');
-    setUserDetailData({
-      name: ticket.reporterName,
-      email: ticket.reporterEmail,
-      phone: ticket.reporterPhone,
-      address: ticket.reporterAddress,
-      department: ticket.reporterDepartment,
-      position: ticket.reporterPosition,
-      isEmployee: ticket.reporterType === 'EMPLOYEE' || !!ticket.reporterDepartment,
-    });
-    setUserDetailOpen(true);
-  };
-
-  const openCustomerDetail = () => {
-    if (!ticket || !ticket.customerData) return;
-    setUserDetailTitle('Detail Customer');
-    setUserDetailData({
-      name: ticket.customerData.name,
-      email: ticket.customerData.email,
-      phone: ticket.customerData.phone,
-      address: ticket.customerData.address,
-      isEmployee: false,
-    });
-    setUserDetailOpen(true);
-  };
+  /* Detail pelapor & pelanggan ditangani TicketSummary (memiliki modalnya
+     sendiri), jadi state + handler di sini tidak dibutuhkan lagi. */
 
   useEffect(() => {
     let cancelled = false;
@@ -116,6 +80,9 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
       })
       .catch(() => {
         // Bukan fatal — dropdown akan tampil kosong, tombol assign menunggu data.
+      })
+      .finally(() => {
+        if (!cancelled) setEmployeeLoading(false);
       });
 
     return () => {
@@ -123,7 +90,7 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
     };
   }, [ticket?.destinationDepartmentId]);
 
-  const confirmAssign = async () => {
+  const submitAssign = async () => {
     if (!ticket) return;
     if (!selectedHandler) {
       toast.error('Pilih handler terlebih dahulu');
@@ -137,6 +104,7 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
       const fresh = await getUnitTicket(id);
       setTicket(fresh);
       setSelectedHandler('');
+      setAssignOpen(false);
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Gagal menugaskan handler.');
     } finally {
@@ -144,8 +112,11 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
     }
   };
 
-  const handleConfirmAssign = async () => {
-    await confirmAssign();
+  // Reset pilihan saat dialog ditutup tanpa submit, supaya buka lagi tidak
+// langsung menampilkan handler yang terakhir dicoba.
+const handleAssignOpenChange = (open: boolean) => {
+    setAssignOpen(open);
+    if (!open) setSelectedHandler('');
   };
 
   if (isLoading || !ticket) {
@@ -153,7 +124,7 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
       <div className="flex items-center justify-center py-16">
         <div className="flex flex-col items-center gap-2 text-center">
           {isLoading ? (
-            <Loader2 className="size-8 animate-spin text-muted-foreground/60" />
+            <Spinner className="size-8 text-muted-foreground/60" />
           ) : (
             <AlertCircle className="size-8 text-muted-foreground/60" />
           )}
@@ -167,443 +138,210 @@ export default function UnitTicketDetailPage({ params }: { params: Promise<{ id:
 
   const handlerAssignments = ticket.handlerAssignments ?? [];
 
+  /**
+   * Ke daftar mana tombol "kembali" harus pergi.
+   *
+   * Antrean Penugasan dan Riwayat Penugasan sama-sama dilayani route
+   * `/unit/tiket`, jadi tanpa penanda asal dari `?from=` tombol ini selalu
+   * kembali ke antrean — salah saat tiket dibuka dari riwayat.
+   */
+  const fromRiwayat = searchParams.get('from') === 'riwayat';
+
   return (
     <div className="flex flex-col gap-6">
-      {/* Top action bar */}
-      <div className="flex items-center justify-between gap-4">
-        <Button
-          variant="ghost"
-          size="sm"
-          asChild
-          className="gap-2 text-muted-foreground hover:text-foreground"
-        >
-          <Link href="/unit/antrean">
-            <ArrowLeft className="size-4" />
-            <span>Kembali</span>
-          </Link>
-        </Button>
-        <TicketChatDrawer ticketId={ticket.id} open={chatOpen} onOpenChange={setChatOpen} readOnly />
-      </div>
-
-      {/* Header info */}
-      <Card>
-        <CardContent className="space-y-4 pt-6">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0 space-y-1">
-              <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
-                <span className="font-semibold text-foreground">{ticket.id}</span>
-                <span>•</span>
-                <span>
-                  {new Date(ticket.createdAt).toLocaleDateString('id-ID', {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                  })}
-                </span>
-              </div>
-              <h1 className="text-xl font-bold tracking-tight md:text-2xl">{ticket.subject}</h1>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <PriorityBadge priority={ticket.priority} />
-              <TypeBadge ticketType={ticket.ticketType} />
-              <StatusBadge status={ticket.status} />
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-x-6 gap-y-3 border-t pt-4 text-xs text-muted-foreground">
-            <div className="flex items-center gap-1.5">
-              <User className="size-4 text-muted-foreground" />
-              <span>
-                Pelapor:{' '}
-                <button
-                  type="button"
-                  onClick={openReporterDetail}
-                  className="font-semibold text-foreground hover:underline"
-                >
-                  {reporterDisplay(ticket)}
-                </button>
-              </span>
-            </div>
-            {customerDisplayName(ticket) && (
-              <div className="flex items-center gap-1.5">
-                <Building className="size-4 text-muted-foreground" />
-                <span>
-                  Pelanggan:{' '}
-                  <button
-                    type="button"
-                    onClick={openCustomerDetail}
-                    className="font-semibold text-foreground hover:underline"
-                  >
-                    {customerDisplayName(ticket)}
-                  </button>
-                </span>
-              </div>
-            )}
-            <div className="flex items-center gap-1.5">
-              <FileText className="size-4 text-muted-foreground" />
-              <span>
-                SO: <strong className="font-semibold text-foreground">{ticket.soNumber ?? '-'}</strong>
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Building className="size-4 text-muted-foreground" />
-              <span>
-                Unit Tujuan:{' '}
-                <strong className="font-semibold text-foreground">
-                  {ticket.destinationDepartmentName || ticket.assignedUnit || '-'}
-                </strong>
-              </span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Header halaman — di luar Card supaya judul/badan/aksi tidak menumpuk */}
+      <TicketHeader
+        ticket={ticket}
+        backHref={fromRiwayat ? '/unit/riwayat' : '/unit/antrean'}
+        backLabel={fromRiwayat ? 'Kembali ke Riwayat Penugasan' : 'Kembali ke Antrean'}
+        actions={
+          // Tanpa `readOnly`: pesan unit dipaksa internal oleh backend
+          // (`resolveInternalFlag`) dan tidak pernah tampil ke pelapor.
+          <TicketChatDrawer ticketId={ticket.id} open={chatOpen} onOpenChange={setChatOpen} />
+        }
+      />
 
       <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Kolom kiri (2/3): detail tiket */}
         <div className="flex min-w-0 flex-col gap-6 lg:col-span-2">
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                <FileText className="size-4 text-muted-foreground" />
-                Rincian Laporan
-              </CardTitle>
-              <CardDescription>Salinan data laporan untuk koordinasi penugasan</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-xs">
-                <div>
-                  <span className="mb-0.5 block text-muted-foreground">Kategori Kendala</span>
-                  <span className="font-semibold text-foreground">
-                    {ticket.category} ({ticket.subcategory})
-                  </span>
-                </div>
-                <div>
-                  <span className="mb-0.5 block text-muted-foreground">Model Kendaraan / Armada</span>
-                  <span className="font-semibold text-foreground">{ticket.vehicleModel || '-'}</span>
-                </div>
-              </div>
+          <TicketSummary ticket={ticket} showWansis />
 
-              <Separator />
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Rincian Laporan</CardTitle>
+              <CardDescription>
+                Salinan data laporan untuk koordinasi penugasan.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-6">
+              {/* Kategori dipindah ke sini dari Ringkasan Tiket supaya
+                  field list Ringkasan seragam di semua halaman detail. */}
+              <DetailList
+                items={[
+                  {
+                    label: 'Kategori Kendala',
+                    value: `${ticket.category} (${ticket.subcategory})`,
+                  },
+                ]}
+              />
 
               <div>
-                <span className="mb-1 block text-xs text-muted-foreground">Deskripsi Lengkap</span>
-                <p className="whitespace-pre-line rounded-lg border bg-muted/30 p-3.5 text-xs leading-relaxed text-foreground md:text-sm">
+                <p className="mb-2 text-xs text-muted-foreground">Deskripsi Lengkap</p>
+                <p className="whitespace-pre-line rounded-lg bg-muted/50 p-4 text-sm leading-relaxed text-foreground">
                   {ticket.description}
                 </p>
               </div>
 
               {ticket.claimedItems && ticket.claimedItems.length > 0 && (
                 <div>
-                  <span className="mb-2 block text-xs font-semibold text-foreground">
-                    Informasi Barang Claim
-                  </span>
+                  <p className="mb-2 text-xs text-muted-foreground">Informasi Barang Claim</p>
                   <ClaimItemsTable items={ticket.claimedItems} />
                 </div>
               )}
 
               {ticket.attachments && ticket.attachments.length > 0 && (
-                <>
-                  <Separator />
-                  <div>
-                    <span className="mb-2 block text-xs text-muted-foreground">
-                      Lampiran Bukti ({ticket.attachments.length})
-                    </span>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      {ticket.attachments.map((att) => (
-                        <a
-                          key={att.id}
-                          href={att.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-2 rounded-lg border bg-card p-2.5 text-xs transition-colors hover:bg-accent"
-                        >
-                          <Paperclip className="size-4 shrink-0 text-primary" />
-                          <span className="flex-1 truncate font-medium">{att.name}</span>
-                          <span className="text-[10px] text-muted-foreground">{att.size}</span>
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                </>
+                <div>
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    Lampiran Bukti ({ticket.attachments.length})
+                  </p>
+                  <AttachmentList items={ticket.attachments} layout="grid" />
+                </div>
               )}
             </CardContent>
           </Card>
 
           {/* Riwayat penugasan tiket ini */}
           <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                <History className="size-4 text-muted-foreground" />
-                Riwayat Penugasan Tiket
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Kronologi pergantian handler tiket ini
-              </CardDescription>
+            <CardHeader>
+              <CardTitle className="text-base">Riwayat Penugasan</CardTitle>
+              <CardDescription>Kronologi pergantian handler tiket ini.</CardDescription>
             </CardHeader>
             <CardContent>
               {handlerAssignments.length === 0 ? (
                 <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed py-8 text-center">
-                  <History className="size-6 text-muted-foreground/40" />
-                  <p className="text-xs text-muted-foreground">Belum ada handler yang ditugaskan</p>
+                  <History aria-hidden className="size-6 text-muted-foreground/40" />
+                  <p className="text-sm text-muted-foreground">
+                    Belum ada handler yang ditugaskan
+                  </p>
                 </div>
               ) : (
-                <div className="relative space-y-4 pl-6">
-                  <div className="absolute bottom-1.5 left-[11px] top-1.5 w-px bg-border" />
+                /* Bentuk visual sengaja sama dengan TicketTimeline supaya
+                   dua daftar kronologi di halaman ini terbaca satu pola. */
+                <ol className="relative space-y-4 border-l pl-5">
                   {handlerAssignments.map((log) => (
-                    <div key={log.id} className="relative">
-                      <div
-                        className={`absolute -left-[18px] top-1.5 size-2.5 rounded-full border-2 ${
-                          log.isActive
-                            ? 'border-primary bg-primary'
-                            : 'border-muted-foreground/40 bg-background'
+                    <li key={log.id} className="relative">
+                      <span
+                        className={`absolute -left-[25px] top-1 size-2.5 rounded-full ring-4 ring-card ${
+                          log.isActive ? 'bg-primary' : 'bg-border'
                         }`}
                       />
-                      <div className="space-y-0.5 rounded-lg border bg-muted/20 p-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-xs font-semibold">
-                            {log.handlerName ?? 'Handler tidak diketahui'}
-                          </span>
-                          {log.isActive && (
-                            <Badge variant="default" className="text-[10px]">
-                              Handler Aktif
-                            </Badge>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-muted-foreground">
-                          Ditugaskan oleh {log.assignedByName ?? '-'} ·{' '}
-                          {log.assignedAt
-                            ? new Date(log.assignedAt).toLocaleString('id-ID', {
-                                day: 'numeric',
-                                month: 'short',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })
-                            : '-'}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-medium text-foreground">
+                          {log.handlerName ?? 'Handler tidak diketahui'}
                         </p>
+                        {log.isActive && (
+                          <DotChip dotClass="bg-emerald-500/70">Aktif</DotChip>
+                        )}
                       </div>
-                    </div>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Ditugaskan oleh {log.assignedByName ?? '-'} ·{' '}
+                        {log.assignedAt
+                          ? new Date(log.assignedAt).toLocaleString('id-ID', {
+                              day: 'numeric',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : '-'}
+                      </p>
+                    </li>
                   ))}
-                </div>
+                </ol>
               )}
             </CardContent>
           </Card>
+
+          <TicketTimeline activities={ticket.activities} />
         </div>
 
-        {/* Kolom kanan (1/3): assign handler */}
+        {/* Kolom kanan (1/3) KHUSUS aksi yang jadi tujuan user membuka halaman
+          ini — hanya Penugasan. Isi referensi (Timeline) tetap di kolom kiri
+          supaya kolom ini tidak jadi tempat yang butuh di-scroll sendiri.
+          Sticky dibatasi di lg+: di mobile layout-nya 1 kolom, jadi sticky
+          akan menutupi header.
+          Wrapper-nya wajib: grid item-nya adalah kolom ini, bukan Card-nya.
+          Kalau Card-nya langsung yang sticky, kolom ini yang sudah di-stretch
+          setinggi row akan ikut jadi tinggi, dan tidak ada ruang gerak. */}
         <div className="flex min-w-0 flex-col gap-6">
-          {ticket.handlerName && (
+          <div className="lg:sticky lg:top-6">
             <Card>
-              <CardHeader className="border-b">
-                <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                  <ClipboardCheck className="size-4 text-emerald-600" />
-                  Handler Aktif
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Tiket ini sudah ditugaskan dan sedang dikerjakan
-                </CardDescription>
+              <CardHeader>
+                <CardTitle className="text-base">Penugasan</CardTitle>
+                <CardDescription>Handler yang menangani tiket ini.</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex items-center gap-3 rounded-lg border bg-emerald-500/5 p-3">
-                  <Avatar className="size-9">
-                    <AvatarFallback className="text-xs">
-                      {ticket.handlerName.slice(0, 2).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="min-w-0 flex-col">
-                    <span className="text-sm font-semibold text-foreground">
-                      {ticket.handlerName}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {ticket.destinationDepartmentName || ticket.assignedUnit || '-'}
-                    </span>
-                  </div>
-                </div>
-                {handlerAssignments.length > 1 && (
-                  <p className="text-[11px] text-muted-foreground">
-                    Ada {handlerAssignments.length} riwayat penugasan — lihat kronologi di kolom
-                    kiri. Mengganti handler akan menonaktifkan handler saat ini.
+              <CardContent className="flex flex-col gap-4">
+                {/* Unit Tujuan pindah ke sini dari Ringkasan Tiket — ini tujuan
+                    penugasan, jadi tempatnya memang kartu Penugasan. */}
+                <DetailList
+                  items={[
+                    {
+                      label: 'Unit Tujuan',
+                      value: ticket.destinationDepartmentName || ticket.assignedUnit || '-',
+                    },
+                  ]}
+                />
+
+                {ticket.handlerName ? (
+                  <>
+                    <div className="flex items-center gap-3 rounded-lg bg-muted/50 p-3">
+                      <Avatar className="size-9">
+                        <AvatarFallback className="text-xs">
+                          {ticket.handlerName.slice(0, 2).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex min-w-0 flex-col">
+                        <span className="text-sm font-medium text-foreground">
+                          {ticket.handlerName}
+                        </span>
+                      </div>
+                    </div>
+                    {handlerAssignments.length > 1 && (
+                      <p className="text-xs text-muted-foreground">
+                        Ada {handlerAssignments.length} riwayat penugasan. Mengganti handler akan
+                        menonaktifkan handler saat ini.
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Belum ada handler yang ditugaskan untuk tiket ini.
                   </p>
                 )}
-                {showReplaceForm ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full gap-1.5 text-xs"
-                    onClick={() => setShowReplaceForm(false)}
-                  >
-                    Batal Pergantian Handler
-                  </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full gap-1.5 text-xs"
-                    onClick={() => setConfirmAction('replace')}
-                  >
-                    <UserPlus className="size-3.5" />
-                    Ganti Handler
-                  </Button>
-                )}
+
+                <Button className="w-full" onClick={() => setAssignOpen(true)}>
+                  <UserPlus data-icon="inline-start" />
+                  {ticket.handlerName ? 'Ganti Handler' : 'Tugaskan Handler'}
+                </Button>
               </CardContent>
             </Card>
-          )}
-
-          {(!ticket.handlerName || showReplaceForm) && (
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                <UserPlus className="size-4 text-primary" />
-                {ticket.handlerName ? 'Ganti Handler' : 'Assign Handler'}
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Tentukan handler penanganan untuk tiket ini
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {showReplaceForm && ticket.handlerName && (
-                <div className="mb-4 rounded-lg border border-amber-600/40 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-400">
-                  Handler aktif ({ticket.handlerName}) akan dinonaktifkan.
-                </div>
-              )}
-              <FieldGroup>
-                <Field>
-                  <FieldLabel>Handler *</FieldLabel>
-                  <Select
-                    value={selectedHandler}
-                    onValueChange={(v) => setSelectedHandler(v ?? '')}
-                    items={employees.map((e) => ({
-                      value: e.id,
-                      label: `${e.full_name}${e.position_name ? ` (${e.position_name})` : ''}`,
-                    }))}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Pilih handler..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {employeeLoading ? (
-                        <SelectItem value="__loading" disabled>
-                          Memuat daftar pegawai...
-                        </SelectItem>
-                      ) : employees.length === 0 ? (
-                        <SelectItem value="__empty" disabled>
-                          Tidak ada pegawai di departemen ini
-                        </SelectItem>
-                      ) : (
-                        employees.map((e) => (
-                          <SelectItem key={e.id} value={e.id}>
-                            {e.full_name}
-                            {e.position_name ? ` (${e.position_name})` : ''}
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                  <FieldDescription>
-                    Handler harus berasal dari departemen yang menerima tiket ini.
-                  </FieldDescription>
-                </Field>
-
-                <Button
-                  onClick={() => setConfirmAction(showReplaceForm ? 'replace' : 'assign')}
-                  className="w-full gap-1.5"
-                  disabled={submitting || !selectedHandler || employees.length === 0}
-                >
-                  {submitting ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <ClipboardCheck className="size-4" />
-                  )}
-                  {showReplaceForm ? 'Konfirmasi Ganti Handler' : 'Konfirmasi Penugasan'}
-                </Button>
-              </FieldGroup>
-            </CardContent>
-          </Card>
-          )}
-
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                <User className="size-4 text-muted-foreground" />
-                Info Pelapor
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2.5 text-xs text-muted-foreground">
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <User className="size-3.5" /> Nama:
-                </span>
-                <span className="font-medium text-foreground">{reporterDisplay(ticket)}</span>
-              </div>
-              {customerDisplayName(ticket) ? (
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <Building className="size-3.5" /> Customer:
-                  </span>
-                  <span className="font-medium text-foreground">
-                    {customerDisplayName(ticket)}
-                  </span>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <Building className="size-3.5" /> Customer:
-                  </span>
-                  <span className="font-medium text-muted-foreground">
-                    Bukan laporan customer
-                  </span>
-                </div>
-              )}
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <FileText className="size-3.5" /> No. SO:
-                </span>
-                <span className="font-medium text-foreground">{ticket.soNumber ?? '-'}</span>
-              </div>
-            </CardContent>
-          </Card>
+          </div>
         </div>
       </div>
 
-      <UserDetailModal
-        open={userDetailOpen}
-        onOpenChange={setUserDetailOpen}
-        title={userDetailTitle}
-        user={userDetailData}
-      />
-
-      {/* Konfirmasi sebelum aksi penting (ASSIGN / REPLACE HANDLER) */}
-      <ConfirmDialog
-        open={confirmAction !== null}
-        onOpenChange={(open) => {
-          if (!open) setConfirmAction(null);
-        }}
-        variant={confirmAction === 'replace' ? 'destructive' : 'default'}
-        icon={
-          confirmAction === 'replace' ? (
-            <AlertCircle className="text-destructive" />
-          ) : (
-            <ClipboardCheck className="text-primary" />
-          )
-        }
-        title={confirmAction === 'replace' ? 'Ganti handler aktif?' : 'Tugaskan handler?'}
-        description={
-          confirmAction === 'replace'
-            ? `Handler aktif (${ticket?.handlerName}) akan dinonaktifkan dan tiket diteruskan ke ${employees.find((e) => e.id === selectedHandler)?.full_name || 'handler baru'}. Lanjutkan?`
-            : `Tiket akan ditugaskan ke ${employees.find((e) => e.id === selectedHandler)?.full_name || 'handler terpilih'}. Lanjutkan?`
-        }
-        confirmLabel={confirmAction === 'replace' ? 'Ya, Ganti' : 'Ya, Tugaskan'}
-        loading={submitting}
-        onConfirm={async () => {
-          const action = confirmAction;
-          setConfirmAction(null);
-          if (action === 'assign') {
-            await handleConfirmAssign();
-          } else if (action === 'replace') {
-            await handleConfirmAssign();
-            setShowReplaceForm(false);
-          }
-        }}
+      <AssignHandlerDialog
+        open={assignOpen}
+        onOpenChange={handleAssignOpenChange}
+        currentHandlerName={ticket.handlerName ?? undefined}
+        options={employees.map((e) => ({
+          value: e.id,
+          label: `${e.full_name}${e.position_name ? ` (${e.position_name})` : ''}`,
+        }))}
+        loadingOptions={employeeLoading}
+        value={selectedHandler}
+        onValueChange={setSelectedHandler}
+        submitting={submitting}
+        onSubmit={submitAssign}
       />
     </div>
   );

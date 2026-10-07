@@ -93,11 +93,19 @@ export interface TicketCustomerData {
 
 export interface Ticket {
   id: string; // e.g. BRT-2026-0913-001
-  ticketType: TicketType;
+  /**
+   * Code apa adanya dari backend (pass-through) — bisa code baru hasil master
+   * data admin. Union `TicketType` hanya untuk code yang dikenal (opsi form,
+   * map badge); jangan paksa field ini ke union itu.
+   */
+  ticketType: string;
   category: string;
   subcategory: string;
-  /** Null = belum ditentukan reviewer (tiket baru) */
-  priority: TicketPriority | null;
+  /**
+   * Null = belum ditentukan reviewer (tiket baru). Code asing tampil apa
+   * adanya — jangan koersi ke "B".
+   */
+  priority: string | null;
   status: TicketStatus;
   subject: string;
   description: string;
@@ -105,6 +113,7 @@ export interface Ticket {
   // SO / Sales info
   soNumber?: string;
   salesName?: string;
+  /** Lini produk = KODE grup WANSIS (nama di-resolve FE via cache item-groups) */
   productLine?: string;
   vehicleModel?: string;
   claimedItems?: TicketItemClaim[];
@@ -123,8 +132,6 @@ export interface Ticket {
   /** Kategori & sub kategori (link ke CategoryEntry.id) */
   categoryId?: string;
   subcategoryId?: string;
-  /** Lini produk (link ke ProductLineEntry.id) */
-  productId?: string;
   /** Hasil identifikasi admin: reporter adalah pegawai / customer */
   reporterType?: 'EMPLOYEE' | 'CUSTOMER';
   /** Link ke EmployeeEntry.id bila reporterType = EMPLOYEE */
@@ -169,6 +176,17 @@ export interface Ticket {
   handlerProgress?: HandlerProgress[];
 
   /**
+   * Nomor report WANSIS untuk klaim distribusi.
+   *
+   * Hanya terisi kalau pengajuan ke WANSIS **berhasil** dan WANSIS sudah
+   * mengembalikan nomor (`status = 'sent'`). Baris `queued`/`failed` tidak
+   * punya nomor, jadi tidak ditampilkan sama sekali — label-nya pun tidak.
+   *
+   * Halaman reporter TIDAK menampilkan ini; lihat `TicketSummary`.
+   */
+  wansisReportNumber?: string;
+
+  /**
    * Timeline kronologis tiket dari pembuatan sampai selesai
    * (ditulis backend via TicketActivityLogger di setiap aksi workflow).
    */
@@ -209,6 +227,10 @@ export interface ResolutionCycle {
   summary: string;
   detail?: string;
   reviewerNote?: string;
+  /** Status review versi ini — untuk chip di riwayat revisi. */
+  reviewDecision?: 'PENDING' | 'APPROVED' | 'REJECTED';
+  /** Lampiran bukti versi ini (backend eager-load per resolusi). */
+  attachments?: TicketAttachment[];
   isCurrent?: boolean;
 }
 
@@ -226,6 +248,15 @@ export interface HandlerProgress {
 export interface TicketActivityEntry {
   id: string;
   activityType: string;
+  /**
+   * Kalimat fakta tentang kejadian, mis. "Laporan dibuat." atau
+   * "Handler ditugaskan: Budi.".
+   *
+   * Untuk `PROGRESS` ini **tidak** berisi catatan handler — backend hanya
+   * menulis "Progres pengerjaan ditambahkan." Isi lengkapnya ada di
+   * `handlerProgress` dan dirender lewat card Riwayat Progres, jadi jangan
+   * dipakai sebagai sumber teks progres.
+   */
   description: string;
   /** Nama aktor (dari backend) */
   actorName?: string;
@@ -263,20 +294,29 @@ export interface TicketChatMessage {
   isInternalOnly?: boolean;
   /** Sudah dihapus (soft delete) — hanya ditampilkan ke admin */
   isDeleted?: boolean;
+  /**
+   * Pengirim pesan ini adalah pemilik tiket. Dihitung backend dari
+   * `tickets.reporter_user_id`, bukan dari klaim klien.
+   *
+   * Untuk orang yang memegang banyak role, dua-duanya benar: ia Reviewer
+   * sekaligus pelapor tiketnya. Digunakan untuk menampilkan keduanya, bukan
+   * menimpa satu menimpa yang lain.
+   */
+  isTicketReporter?: boolean;
   /** Pengirim ini berhak menghapus pesan (pengirimnya sendiri / admin) */
   canDelete?: boolean;
-  /** Lampiran (file / gambar) pada pesan chat */
+  /** Lampiran (gambar / video / dokumen) pada pesan chat. */
   attachments?: TicketChatAttachment[];
 }
 
-export interface TicketChatAttachment {
-  id: string;
-  name: string;
-  size: string;
-  type: 'image' | 'file';
-  /** URL preview lokal (URL.createObjectURL) — runtime saja */
-  previewUrl?: string;
-}
+/**
+ * Lampiran pada pesan chat.
+ *
+ * Bentuknya identik dengan `TicketAttachment` (lihat `TicketInteractionController::format`),
+ * karena `AttachmentList` membedakan gambar / video / dokumen lewat `type`
+ * yang berisi MIME — bukan lewat flag `'image' | 'file'`.
+ */
+export type TicketChatAttachment = TicketAttachment;
 
 export interface TableFilterValues {
   priority?: string;

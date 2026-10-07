@@ -16,7 +16,6 @@ import {
   Users,
   ContactRound,
   MonitorCog,
-  BadgeCheck,
   Package,
 } from 'lucide-react';
 import { AppLayout, type NavGroup } from '@/components/shared/AppLayout';
@@ -37,7 +36,6 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Tiket',
     items: [
-      // { href: '/admin/ticket/action', label: 'Perlu Tindakan', icon: BadgeCheck },
       { href: '/admin/ticket/monitoring', label: 'Monitoring Tiket', icon: MonitorCog },
       { href: '/admin/ticket/history', label: 'Riwayat Tiket', icon: Package },
     ],
@@ -49,7 +47,6 @@ const ROUTE_LABELS: Record<string, string> = {
   '/admin/master-data': 'Master Data',
   '/admin/pegawai': 'Pegawai',
   '/admin/pelanggan': 'Pelanggan',
-  // '/admin/ticket/action': 'Perlu Tindakan',
   '/admin/ticket/monitoring': 'Monitoring Tiket',
   '/admin/ticket/history': 'Riwayat Tiket',
 };
@@ -62,12 +59,10 @@ function AdminBreadcrumb({ pathname }: { pathname: string }) {
   const isDetail = ticketSub && segs.length >= 4;
 
   const parentLabel: Record<string, string> = {
-    action: 'Perlu Tindakan',
     monitoring: 'Monitoring Tiket',
     history: 'Riwayat Tiket',
   };
   const parentHref: Record<string, string> = {
-    action: '/admin/ticket/action',
     monitoring: '/admin/ticket/monitoring',
     history: '/admin/ticket/history',
   };

@@ -1,14 +1,7 @@
-import type { TicketChatMessage } from '@/lib/types/ticket';
+import type { TicketChatAttachment, TicketChatMessage } from '@/lib/types/ticket';
 import { authenticatedFetch } from './fetch-wrapper';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
-
-async function authToken(): Promise<string> {
-  if (typeof window === 'undefined') return '';
-  const token = localStorage.getItem('brthub_token') || localStorage.getItem('auth_token');
-  if (!token) throw new Error('Sesi Anda tidak ditemukan. Silakan masuk kembali.');
-  return token;
-}
 
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -21,6 +14,15 @@ function string(value: unknown, fallback = ''): string {
 }
 
 /** Bentuk pesan dari backend (TicketInteractionController). */
+export interface InteractionAttachmentPayload {
+  id: string;
+  name: string;
+  size: string;
+  mime_type: string;
+  url: string;
+}
+
+/** Bentuk pesan dari backend (TicketInteractionController). */
 export interface InteractionPayload {
   id: string;
   ticket_id: string;
@@ -28,8 +30,10 @@ export interface InteractionPayload {
   sender_name: string;
   sender_role: string;
   is_internal: boolean;
+  is_ticket_reporter?: boolean;
   is_deleted: boolean;
   message: string;
+  attachments?: InteractionAttachmentPayload[];
   created_at: string | null;
   can_delete: boolean;
 }
@@ -49,8 +53,24 @@ function formatTimestamp(value: unknown): string {
   });
 }
 
+function toChatAttachment(value: unknown): TicketChatAttachment {
+  const item = record(value);
+  return {
+    id: string(item.id),
+    name: string(item.name, string(item.file_name)),
+    // Backend mengirim `size` sebagai byte mentah string; pemformatannya ke
+    // manusia dilakukan `AttachmentList` (`normalizeSize`).
+    size: string(item.size),
+    // `type` harus MIME penuh (`image/png`), bukan `'image'`: `AttachmentList`
+    // menentukannya lewat `type.startsWith('image/')` dan `isPreviewable`.
+    type: string(item.mime_type, string(item.type)),
+    url: string(item.url),
+  };
+}
+
 function toChatMessage(value: unknown): TicketChatMessage {
   const item = record(value);
+  const attachments = Array.isArray(item.attachments) ? item.attachments : [];
   return {
     id: string(item.id),
     ticketId: string(item.ticket_id),
@@ -61,8 +81,29 @@ function toChatMessage(value: unknown): TicketChatMessage {
     timestamp: formatTimestamp(item.created_at),
     isInternalOnly: Boolean(item.is_internal),
     isDeleted: Boolean(item.is_deleted),
+    isTicketReporter: Boolean(item.is_ticket_reporter),
     canDelete: Boolean(item.can_delete),
+    attachments: attachments.length > 0 ? attachments.map(toChatAttachment) : undefined,
   };
+}
+
+/**
+ * Pesan error dari respons Laravel.
+ *
+ * Validasi file (ukuran, tipe) Returning 422 dengan `errors`, sementara
+ * `message`-nya generik ("The attachments.0 field must be a file of type...").
+ * Karena itu pesan per-field ikut dikembalikan agar user tahu berkas mana
+ * yang ditolak dan kenapa.
+ */
+function errorMessage(payload: unknown, fallback: string): string {
+  const body = record(payload);
+  const errors = record(body.errors);
+  const firstError = Array.isArray(errors) ? string(errors[0]) : '';
+  for (const value of Object.values(errors)) {
+    const candidate = Array.isArray(value) ? string(value[0]) : '';
+    if (candidate) return candidate;
+  }
+  return string(body.message, firstError || fallback);
 }
 
 async function request<T>(url: string, options: RequestInit): Promise<T> {
@@ -73,21 +114,38 @@ async function request<T>(url: string, options: RequestInit): Promise<T> {
   const payload: unknown = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(string(record(payload).message, 'Gagal memuat percakapan tiket.'));
+    throw new Error(errorMessage(payload, 'Gagal memuat percakapan tiket.'));
   }
 
   return payload as T;
 }
 
 /**
+ * Permukaan pemanggil.
+ *
+ * - `staff`    — portal staf (default)
+ * - `reporter` — portal pelapor: tampilan pelanggan, hanya pesan publik
+ *
+ * Penanda ini dikirim karena kedua portal memakai token yang sama sehingga
+ * backend tidak bisa membedakannya sendiri. Sifatnya monoton — hanya mengurangi
+ * yang terlihat — sehingga tidak bisa dipakai untuk mendapat akses tambahan.
+ */
+export type ChatSurface = 'staff' | 'reporter';
+
+/**
  * Ambil daftar pesan sebuah tiket.
  *
- * Backend sudah memfilter pesan internal sesuai peran: reporter hanya
- * menerima pesan publik, staf internal & approver menerima semuanya.
+ * Backend memfilter pesan internal sesuai peran dan permukaan pemanggil:
+ * portal pelapor selalu hanya menerima pesan publik, staf internal & approver
+ * pada portal staf menerima semuanya.
  */
-export async function getTicketInteractions(ticketId: string): Promise<TicketChatMessage[]> {
+export async function getTicketInteractions(
+  ticketId: string,
+  surface: ChatSurface = 'staff',
+): Promise<TicketChatMessage[]> {
+  const query = surface === 'reporter' ? '?surface=reporter' : '';
   const payload = await request<{ data?: InteractionPayload[] }>(
-    `${API_URL}/api/auth/tickets/${encodeURIComponent(ticketId)}/interactions`,
+    `${API_URL}/api/auth/tickets/${encodeURIComponent(ticketId)}/interactions${query}`,
     { method: 'GET' },
   );
 
@@ -96,24 +154,35 @@ export async function getTicketInteractions(ticketId: string): Promise<TicketCha
 }
 
 /**
- * Kirim pesan baru.
+ * Kirim pesan baru, dengan lampiran opsional.
  *
- * `isInternalOnly` hanya berlaku untuk reviewer & handler. Backend memaksa
- * pesan approver/unit/admin menjadi internal dan pesan reporter menjadi
- * publik, jadi flag klien bersifat indikatif.
+ * `isInternalOnly` hanya berlaku untuk reviewer & handler di portal staf.
+ * Backend memaksa pesan approver/unit/admin menjadi internal, pesan pelapor
+ * menjadi publik, dan di portal pelapor `is_internal` diabaikan total —
+ * jadi flag klien bersifat indikatif, bukan otoritatif.
+ *
+ * Ada lampiran → body `FormData`. `Content-Type` sengaja tidak di-set manual:
+ * `authenticatedFetch` sudah melewatkannya untuk body `FormData` dan browser
+ * yang harus menambahkan `boundary`.
  */
 export async function sendTicketInteraction(
   ticketId: string,
   message: string,
   isInternalOnly = false,
+  attachments: File[] = [],
+  surface: ChatSurface = 'staff',
 ): Promise<TicketChatMessage> {
+  const form = new FormData();
+  form.append('content', message);
+  form.append('is_internal', isInternalOnly ? '1' : '0');
+  if (surface === 'reporter') {
+    form.append('surface', 'reporter');
+  }
+  attachments.forEach((file) => form.append('attachments[]', file));
+
   const payload = await request<{ data?: InteractionPayload }>(
     `${API_URL}/api/auth/tickets/${encodeURIComponent(ticketId)}/interactions`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: message, is_internal: isInternalOnly }),
-    },
+    { method: 'POST', body: form },
   );
 
   return toChatMessage(record(payload).data);

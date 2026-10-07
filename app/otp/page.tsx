@@ -5,13 +5,15 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { RefreshCwIcon, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Field, FieldLabel, FieldGroup, FieldDescription } from '@/components/ui/field';
 import { InputOTP, InputOTPGroup, InputOTPSeparator, InputOTPSlot } from '@/components/ui/input-otp';
 import { ModeToggle } from '@/components/shared/ModeToggle';
 import { toast } from 'sonner';
 import { authServiceClient } from '@/lib/api/auth-service';
-import { brthubApi, deriveRoles, resolveRoleRedirect, roleFromRedirect } from '@/lib/api/brthub-api';
+import { brthubApi, deriveRoles, resolveStaffDestination, roleFromRedirect } from '@/lib/api/brthub-api';
+import { saveReporterSession, setTokenExpiry } from '@/lib/api/fetch-wrapper';
 import { useAuth, type AuthUser } from '@/lib/auth/auth-context';
 
 function OtpForm() {
@@ -38,6 +40,7 @@ function OtpForm() {
   const [code, setCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [resendCountdown, setResendCountdown] = useState(30);
+  const [resending, setResending] = useState(false);
 
   useEffect(() => {
     if (!identifier) {
@@ -54,7 +57,7 @@ function OtpForm() {
   }, []);
 
   // ─── Staff login: verify OTP → fetch me from be-brthub → set AuthContext → redirect by role
-  const handleStaffLogin = async (accessToken: string, refreshToken: string) => {
+  const handleStaffLogin = async (accessToken: string, refreshToken: string, expiresIn?: number) => {
     let meData;
     try {
       // Token eksplisit: saat ini belum (dan tidak boleh) tersimpan di
@@ -62,11 +65,11 @@ function OtpForm() {
       // tidak memicu redirect otomatis dari fetch-wrapper saat masih di /otp.
       meData = await brthubApi.getMe(accessToken, { skipAuthRefresh: true });
     } catch {
-      throw new Error('Gagal mengambil profil pengguna. Pastikan Anda memiliki akun karyawan BRTHub.');
+      throw new Error('Gagal mengambil profil pengguna. Pastikan Anda memiliki akun petugas BRTHub.');
     }
 
     if (!meData.success) {
-      throw new Error('Akun tidak ditemukan di BRTHub. Hubungi admin untuk pendaftaran akun karyawan.');
+      throw new Error('Akun tidak ditemukan di BRTHub. Hubungi admin untuk pendaftaran akun petugas.');
     }
 
     const roles = deriveRoles(
@@ -95,18 +98,29 @@ function OtpForm() {
       preferredRole = null;
     }
 
-    const destination = resolveRoleRedirect(roles, preferredRole);
+    const destination = resolveStaffDestination(roles, preferredRole, searchParams.get('next'));
     // Simpan ke AuthContext + localStorage (refresh token dipakai oleh
     // fetch-wrapper untuk memperbarui access token saat kedaluwarsa),
     // sekaligus sinkronkan badge dengan halaman tujuan.
-    login(accessToken, refreshToken, authUser, roleFromRedirect(destination));
+    login(accessToken, refreshToken, authUser, roleFromRedirect(destination), expiresIn);
     toast.success(`Login berhasil! Selamat datang, ${meData.user.full_name}.`);
     router.push(destination);
   };
 
   // ─── Reporter login: existing flow (save raw token, redirect to report page)
-  const handleReporterLogin = async (accessToken: string, expiresIn?: number) => {
-    localStorage.setItem('auth_token', accessToken);
+  const handleReporterLogin = async (
+    accessToken: string,
+    expiresIn?: number,
+    refreshToken?: string,
+  ) => {
+    // Key terpusat di fetch-wrapper (jangan hardcode string di sini).
+    // Refresh token reporter — key TERPISAH dari staff agar tidak saling
+    // timpa di browser bersama. Tanpa ini reporter mati tiap access expired.
+    saveReporterSession(accessToken, refreshToken);
+    // Umur untuk scheduler proaktif (lihat fetch-wrapper).
+    if (Number.isFinite(Number(expiresIn)) && Number(expiresIn) > 0) {
+      setTokenExpiry('reporter', Number(expiresIn));
+    }
 
     try {
       const userResult = await authServiceClient.getUser(accessToken);
@@ -156,9 +170,9 @@ function OtpForm() {
       }
 
       if (isStaffMode) {
-        await handleStaffLogin(accessToken, result.data?.refresh_token ?? '');
+        await handleStaffLogin(accessToken, result.data?.refresh_token ?? '', result.data?.expires_in);
       } else {
-        await handleReporterLogin(accessToken, result.data?.expires_in);
+        await handleReporterLogin(accessToken, result.data?.expires_in, result.data?.refresh_token);
       }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Kode OTP salah atau habis berlaku';
@@ -170,18 +184,23 @@ function OtpForm() {
   };
 
   const handleResend = async () => {
-    if (resendCountdown > 0) return;
+    if (resendCountdown > 0 || resending) return;
 
+    setResending(true);
     try {
       const action = isStaffMode
         ? isEmail ? 'email_login' : 'phone_login'
         : isEmail ? 'email_otp' : 'phone_otp';
-      await authServiceClient.requestOtp(identifier, action);
+      await toast.promise(authServiceClient.requestOtp(identifier, action), {
+        loading: 'Mengirim ulang kode OTP…',
+        success: 'Kode OTP baru telah dikirim ulang.',
+        error: (err) => (err instanceof Error ? err.message : 'Gagal mengirim ulang OTP'),
+      });
+      // Countdown hanya diulang saat kirim berhasil — gagal berarti boleh
+      // langsung coba lagi tanpa menunggu 30 detik.
       setResendCountdown(30);
-      toast.success('Kode OTP baru telah dikirim ulang.');
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : 'Gagal mengirim ulang OTP';
-      toast.error(msg);
+    } finally {
+      setResending(false);
     }
   };
 
@@ -199,7 +218,7 @@ function OtpForm() {
     <Card className="shadow-xs">
       <CardHeader>
         <CardTitle>
-          {isStaffMode ? 'Verifikasi Login Karyawan' : 'Verifikasi Login Anda'}
+          {isStaffMode ? 'Verifikasi Login Petugas' : 'Verifikasi Login Anda'}
         </CardTitle>
         <CardDescription>
           Masukkan kode verifikasi 6 digit yang dikirim{' '}
@@ -219,9 +238,13 @@ function OtpForm() {
                   variant="outline"
                   size="xs"
                   onClick={handleResend}
-                  disabled={resendCountdown > 0}
+                  disabled={resendCountdown > 0 || resending}
                 >
-                  <RefreshCwIcon className="size-3.5" />
+                  {resending ? (
+                    <Spinner data-icon="inline-start" />
+                  ) : (
+                    <RefreshCwIcon data-icon="inline-start" />
+                  )}
                   {resendCountdown > 0 ? `Kirim Ulang (${resendCountdown}s)` : 'Kirim Ulang Kode'}
                 </Button>
               </div>
@@ -255,6 +278,7 @@ function OtpForm() {
 
             <Field>
               <Button type="submit" className="w-full" disabled={isLoading}>
+                {isLoading && <Spinner data-icon="inline-start" />}
                 {isLoading ? 'Memverifikasi...' : 'Verifikasi'}
               </Button>
             </Field>

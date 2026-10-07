@@ -1,300 +1,413 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import type { ColumnVisibilityState } from '@tanstack/react-table';
 import Link from 'next/link';
-import { getHandlerTickets, type HandlerTicketStatus } from '@/lib/api/handler';
-import type { Ticket } from '@/lib/types/ticket';
-import { StatusBadge, TypeBadge, PriorityBadge } from '@/components/shared/StatusBadge';
-import { StatisticsCard } from '@/components/shared/StatisticsCard';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
-  Inbox,
-  LoaderCircle,
-  CheckCircle2,
-  AlertCircle,
-  Clock,
-  ArrowUpRight,
-  Loader2,
-} from 'lucide-react';
+  getHandlerSummary,
+  type HandlerActivity,
+  type HandlerSummary,
+  type HandlerSummaryTicket,
+} from '@/lib/api/handler-dashboard';
+import { PriorityBadge, StatusBadge, TypeBadge } from '@/components/shared/StatusBadge';
+import { StatisticsCard } from '@/components/shared/StatisticsCard';
+import { DataTable, createColumnHelper, type ColumnDef } from '@/components/shared/DataTable';
+import type { DataTableFeatures } from '@/components/shared/data-table-features';
+import { TableSkeleton } from '@/components/shared/TableSkeleton';
+import { ColumnToggle } from '@/components/shared/ColumnToggle';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { AlertTriangle, ArrowUpRight, CheckCircle2, CircleCheckBig, Clock, Inbox, RefreshCw, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
-interface ActivityItem {
-  id: string;
-  actor: string;
-  action: string;
-  notes: string;
-  timestamp: string;
-  sortKey: number;
+/** Berapa aktivitas terbaru yang ditampilkan di kartu aktivitas. */
+const ACTIVITY_LIMIT = 5;
+
+/** Format durasi jam jadi satuan yang enak dibaca. */
+function formatHours(hours: number): string {
+  if (hours < 24) return `${Math.round(hours)} jam`;
+  return `${(hours / 24).toFixed(1).replace('.', ',')} hari`;
 }
 
-function toEpoch(value: string): number {
-  const n = Date.parse(value);
-  return Number.isNaN(n) ? 0 : n;
+/** Timestamp ISO → "3 Okt, 05.14". Versi lama menampilkan string ISO mentah. */
+function formatMoment(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
+
+const columnHelper = createColumnHelper<DataTableFeatures, HandlerSummaryTicket>();
+
+const urgentColumns: ColumnDef<DataTableFeatures, HandlerSummaryTicket>[] = columnHelper.columns([
+  columnHelper.accessor('ticket_no', {
+    header: 'ID Tiket',
+    cell: ({ row }) => (
+      <span className="font-mono text-xs whitespace-nowrap">{row.original.ticket_no}</span>
+    ),
+  }),
+  columnHelper.accessor('subject', {
+    header: 'Subjek',
+    cell: ({ row }) => (
+      <div className="max-w-[240px] space-y-0.5">
+        <p className="truncate text-sm font-medium">{row.original.subject}</p>
+        <p className="truncate text-xs text-muted-foreground">SO: {row.original.so_number ?? '-'}</p>
+      </div>
+    ),
+  }),
+  columnHelper.display({
+    id: 'tipe',
+    header: 'Tipe',
+    cell: ({ row }) => <TypeBadge ticketType={row.original.ticket_type_code} />,
+  }),
+  columnHelper.display({
+    id: 'prioritas',
+    header: 'Prioritas',
+    cell: ({ row }) => <PriorityBadge priority={row.original.priority_code} />,
+  }),
+  columnHelper.display({
+    id: 'status',
+    header: 'Status',
+    cell: ({ row }) => <StatusBadge status={row.original.status_code ?? 'IN_PROGRESS'} />,
+  }),
+  columnHelper.display({
+    id: 'umur',
+    header: 'Umur',
+    cell: ({ row }) => (
+      <span
+        className={cn(
+          'text-sm whitespace-nowrap tabular-nums',
+          row.original.age_days >= 3 ? 'font-semibold text-destructive' : 'text-muted-foreground',
+        )}
+      >
+        {row.original.age_days} hari
+      </span>
+    ),
+  }),
+  columnHelper.display({
+    id: 'aksi',
+    header: () => <div className="text-right">Aksi</div>,
+    cell: ({ row }) => (
+      <div className="text-right">
+        <Button size="sm" asChild>
+          <Link href={`/handler/ticket/${row.original.ticket_no}`}>
+            Detail
+            <ArrowUpRight data-icon="inline-end" />
+          </Link>
+        </Button>
+      </div>
+    ),
+    enableHiding: false,
+  }),
+]);
 
 export default function HandlerDashboardPage() {
+  const [summary, setSummary] = useState<HandlerSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [byStatus, setByStatus] = useState<Record<HandlerTicketStatus, Ticket[]>>({
-    NEED_ACTION: [],
-    WAITING_REVIEW: [],
-    REWORK: [],
-    HISTORY: [],
-  });
+  const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
+  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>({});
 
+  // SetState di dalam async IIFE — bukan langsung di badan effect — supaya
+  // `react-hooks/set-state-in-effect` tetap tenang dan state tidak ditulis
+  // setelah unmount.
   useEffect(() => {
     let cancelled = false;
 
-    Promise.all([
-      getHandlerTickets('NEED_ACTION'),
-      getHandlerTickets('WAITING_REVIEW'),
-      getHandlerTickets('REWORK'),
-      getHandlerTickets('HISTORY'),
-    ])
-      .then(([need, waiting, rework, history]) => {
-        if (cancelled) return;
-        setByStatus({
-          NEED_ACTION: need.data,
-          WAITING_REVIEW: waiting.data,
-          REWORK: rework.data,
-          HISTORY: history.data,
-        });
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        toast.error(error instanceof Error ? error.message : 'Gagal memuat dashboard handler.');
-      })
-      .finally(() => {
+    (async () => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const data = await getHandlerSummary();
+        if (!cancelled) setSummary(data);
+      } catch (e) {
+        if (!cancelled) {
+          const message = e instanceof Error ? e.message : 'Gagal memuat dashboard handler.';
+          setError(message);
+          toast.error(message);
+        }
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [retryKey]);
 
-  const metrics = useMemo(
-    () => [
-      {
-        label: 'Perlu Tindakan',
-        value: String(byStatus.NEED_ACTION.length),
-        subtitle: 'Belum ada resolusi',
-        icon: Inbox,
-      },
-      {
-        label: 'Menunggu Review',
-        value: String(byStatus.WAITING_REVIEW.length),
-        subtitle: 'Resolusi diajukan',
-        icon: LoaderCircle,
-        showTrend: true,
-      },
-      {
-        label: 'Perlu Revisi',
-        value: String(byStatus.REWORK.length),
-        subtitle: 'Resolusi ditolak approver',
-        icon: AlertCircle,
-      },
-      {
-        label: 'Selesai',
-        value: String(byStatus.HISTORY.length),
-        subtitle: 'Resolusi disetujui / ditutup',
-        icon: CheckCircle2,
-        showTrend: true,
-      },
-    ],
-    [byStatus],
-  );
-
-  const urgentQueue = useMemo(() => byStatus.NEED_ACTION.slice(0, 5), [byStatus.NEED_ACTION]);
-
-  const recentActivities = useMemo<ActivityItem[]>(() => {
-    const items: ActivityItem[] = [];
-    for (const group of Object.values(byStatus)) {
-      for (const ticket of group) {
-        for (const p of ticket.handlerProgress ?? []) {
-          items.push({
-            id: `${ticket.id}-prog-${p.id}`,
-            actor: p.actorName ?? ticket.handlerName ?? 'Handler',
-            action: 'menambahkan progres',
-            notes: p.note,
-            timestamp: p.timestamp,
-            sortKey: toEpoch(p.timestamp),
-          });
-        }
-        for (const r of ticket.resolutions ?? []) {
-          items.push({
-            id: `${ticket.id}-res-${r.id}`,
-            actor: ticket.handlerName ?? 'Handler',
-            action: `mengajukan resolusi #${r.resolutionNo}`,
-            notes: r.summary,
-            timestamp: r.submittedAt,
-            sortKey: toEpoch(r.submittedAt),
-          });
-        }
-      }
-    }
-    return items.sort((a, b) => b.sortKey - a.sortKey).slice(0, 6);
-  }, [byStatus]);
-
-  if (loading) {
+  if (error) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <Loader2 className="size-8 animate-spin text-muted-foreground/60" />
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
+        <AlertTriangle className="size-10 text-destructive" />
+        <div>
+          <p className="text-lg font-semibold">Gagal memuat dasbor</p>
+          <p className="text-sm text-muted-foreground">{error}</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setRetryKey((k) => k + 1)}>
+          <RefreshCw data-icon="inline-start" />
+          Coba lagi
+        </Button>
       </div>
     );
   }
 
+  const kpi = summary?.kpi;
+  const queue = summary?.oldest_need_action ?? [];
+  const activity = summary?.recent_activity ?? [];
+
   return (
     <div className="flex flex-col gap-6">
-      {/* Metrics */}
-      <div className="grid grid-cols-2 gap-6 xl:grid-cols-4">
-        {metrics.map((m) => (
-          <StatisticsCard key={m.label} {...m} />
-        ))}
+      {/* Empat KPI antrean — grid 4 kolom, bukan 6, karena jumlahnya genap. */}
+      <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+        <StatisticsCard
+          icon={Inbox}
+          label="Perlu Tindakan"
+          value={kpi ? String(kpi.need_action) : '…'}
+          subtitle="Belum ada resolusi"
+        />
+        <StatisticsCard
+          icon={Clock}
+          label="Menunggu Review"
+          value={kpi ? String(kpi.waiting_review) : '…'}
+          subtitle="Resolusi diajukan"
+        />
+        <StatisticsCard
+          icon={RotateCcw}
+          label="Perlu Revisi"
+          value={kpi ? String(kpi.rework) : '…'}
+          subtitle="Resolusi ditolak approver"
+        />
+        <StatisticsCard
+          icon={CheckCircle2}
+          label="Selesai"
+          value={kpi ? String(kpi.history) : '…'}
+          subtitle="Disetujui / ditutup"
+        />
       </div>
 
-      {/* Urgent Queue Table */}
-      <Card className="col-span-full w-full gap-0 overflow-hidden p-0">
-        <CardHeader className="border-b px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <CardTitle>Perlu Tindakan Segera</CardTitle>
+      {/* Bento — antrean lebar, kolom kanan untuk hasil kerja + aktivitas. */}
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-6">
+        <Card className="xl:col-span-4">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-base">Perlu Tindakan Segera</CardTitle>
+              <CardDescription>Tiket paling lama menunggu Anda</CardDescription>
             </div>
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/handler/need-action">
-                Lihat semua
-                <ArrowUpRight data-icon="inline-end" />
-              </Link>
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {urgentQueue.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-              <Inbox className="size-6 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">
-                Tidak ada tiket yang perlu ditindaklanjuti saat ini.
-              </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <ColumnToggle
+                columns={urgentColumns}
+                visibility={columnVisibility}
+                onVisibilityChange={setColumnVisibility}
+              />
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/handler/need-action">
+                  Lihat semua
+                  <ArrowUpRight data-icon="inline-end" />
+                </Link>
+              </Button>
             </div>
-          ) : (
-            <>
-              <div className="border-t md:hidden">
-                {urgentQueue.map((ticket) => (
-                  <div key={ticket.id} className="space-y-3 border-b p-4 last:border-0">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 space-y-1">
-                        <p className="font-mono text-xs text-muted-foreground">{ticket.id}</p>
-                        <p className="line-clamp-2 text-sm font-semibold">{ticket.subject}</p>
-                        <p className="truncate text-xs text-muted-foreground">SO: {ticket.soNumber ?? '-'}</p>
-                      </div>
-                      <div className="flex shrink-0 flex-col items-end gap-1.5">
-                        <PriorityBadge priority={ticket.priority} />
-                        <TypeBadge ticketType={ticket.ticketType} />
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <StatusBadge status={ticket.status} />
-                      <Button variant="outline" size="sm" asChild className="h-7 text-xs">
-                        <Link href={`/handler/ticket/${ticket.id}`}>Detail</Link>
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="hidden md:block">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="bg-muted/50 px-6 py-3">ID Tiket</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3">Subjek</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3">Tipe</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3">Prioritas</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3">Status</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3">Aksi</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {urgentQueue.map((ticket) => (
-                      <TableRow key={ticket.id}>
-                        <TableCell className="whitespace-nowrap px-6 py-3 font-mono text-xs">{ticket.id}</TableCell>
-                        <TableCell className="px-6 py-3">
-                          <div className="max-w-[240px] space-y-0.5">
-                            <p className="truncate text-sm font-medium">{ticket.subject}</p>
-                            <p className="truncate text-xs text-muted-foreground">SO: {ticket.soNumber ?? '-'}</p>
+          </CardHeader>
+          <CardContent>
+            {loading && queue.length === 0 ? (
+              <TableSkeleton rows={5} />
+            ) : queue.length === 0 ? (
+              <Empty className="border-0 py-12">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <CircleCheckBig />
+                  </EmptyMedia>
+                  <EmptyTitle>Tidak ada tiket yang perlu ditindaklanjuti</EmptyTitle>
+                  <EmptyDescription>
+                    Semua tiket yang ditugaskan kepada Anda sudah dikerjakan.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              <>
+                <div
+                  className={cn(
+                    // Tanpa `px-*`: `CardContent` sudah memberi padding kiri-kanan.
+                    'space-y-3 transition-opacity md:hidden',
+                    loading && 'pointer-events-none opacity-50',
+                  )}
+                >
+                  {queue.map((ticket) => (
+                    <div key={ticket.ticket_no} className="rounded-lg border bg-card py-4">
+                      <div className="space-y-2 px-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 space-y-0.5">
+                            <p className="font-mono text-xs text-muted-foreground">
+                              {ticket.ticket_no}
+                            </p>
+                            <p className="line-clamp-2 text-sm font-medium leading-snug">
+                              {ticket.subject}
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              SO: {ticket.so_number ?? '-'}
+                            </p>
                           </div>
-                        </TableCell>
-                        <TableCell className="px-6 py-3">
-                          <TypeBadge ticketType={ticket.ticketType} />
-                        </TableCell>
-                        <TableCell className="px-6 py-3">
-                          <PriorityBadge priority={ticket.priority} />
-                        </TableCell>
-                        <TableCell className="px-6 py-3">
-                          <StatusBadge status={ticket.status} />
-                        </TableCell>
-                        <TableCell className="px-6 py-3">
-                          <Button variant="ghost" size="sm" asChild className="gap-1 text-xs">
-                            <Link href={`/handler/ticket/${ticket.id}`}>
+                          <div className="flex shrink-0 flex-col items-end gap-1.5">
+                            <PriorityBadge priority={ticket.priority_code} />
+                            <TypeBadge ticketType={ticket.ticket_type_code} />
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs text-muted-foreground">
+                            Menunggu {ticket.age_days} hari
+                          </span>
+                          <Button size="sm" asChild>
+                            <Link href={`/handler/ticket/${ticket.ticket_no}`}>
                               Detail
-                              <ArrowUpRight className="size-3.5" />
+                              <ArrowUpRight data-icon="inline-end" />
                             </Link>
                           </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Recent Activity */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base font-semibold">
-            <Clock className="size-4 text-muted-foreground" />
-            Aktivitas Terbaru
-          </CardTitle>
-          <CardDescription>Progres & pengajuan resolusi terakhir Anda</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {recentActivities.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Tidak ada aktivitas terbaru</p>
-            ) : (
-              recentActivities.map((act) => (
-                <div key={act.id} className="flex gap-3">
-                  <div className="mt-1 flex flex-col items-center">
-                    <div className="size-2 rounded-full bg-primary" />
-                    {act.id !== recentActivities[recentActivities.length - 1].id && (
-                      <div className="h-4 w-px bg-border" />
-                    )}
-                  </div>
-                  <div className="flex-1 space-y-1">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="text-sm">
-                          <span className="font-medium">{act.actor}</span> {act.action}
-                          <span className="mx-1 text-muted-foreground">•</span>
-                          <span className="font-medium text-primary">Tiket</span>
-                        </p>
-                        {act.notes && (
-                          <p className="mt-1 text-xs text-muted-foreground">Catatan: {act.notes}</p>
-                        )}
+                        </div>
                       </div>
-                      <span className="whitespace-nowrap text-xs text-muted-foreground">{act.timestamp}</span>
                     </div>
-                  </div>
+                  ))}
                 </div>
-              ))
+
+                <div className="hidden md:block">
+                  <DataTable
+                    columns={urgentColumns}
+                    data={queue}
+                    isPending={loading}
+                    showRowNumbers
+                    columnVisibility={columnVisibility}
+                    onColumnVisibilityChange={setColumnVisibility}
+                    emptyText="Tidak ada tiket yang perlu ditindaklanjuti saat ini."
+                    footer={() => null}
+                  />
+                </div>
+              </>
             )}
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+
+        <div className="flex flex-col gap-6 xl:col-span-2">
+          {/* Hasil kerja — metrik yang sebelumnya tidak ada sama sekali. */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Hasil Kerja Anda</CardTitle>
+              <CardDescription>Sepanjang waktu</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loading && !summary ? (
+                <Skeleton className="h-[92px] w-full rounded-lg" />
+              ) : (
+                <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+                  {(
+                    [
+                      { label: 'Entri progres', value: String(kpi?.progress_count ?? 0) },
+                      { label: 'Resolusi diajukan', value: String(kpi?.resolutions_submitted ?? 0) },
+                      {
+                        label: 'Rasio rework',
+                        value:
+                          kpi?.rework_rate !== null && kpi?.rework_rate !== undefined
+                            ? `${kpi.rework_rate.toFixed(1).replace('.', ',')}%`
+                            : '—',
+                        tone:
+                          (kpi?.rework_rate ?? 0) > 50
+                            ? 'text-destructive'
+                            : (kpi?.rework_rate ?? 0) > 0
+                              ? 'text-amber-600'
+                              : 'text-foreground',
+                      },
+                      {
+                        label: 'Rata-rata penyelesaian',
+                        value:
+                          summary?.avg_resolution_hours !== null &&
+                          summary?.avg_resolution_hours !== undefined
+                            ? formatHours(summary.avg_resolution_hours)
+                            : '—',
+                      },
+                    ] as const
+                  ).map((item) => (
+                    <div key={item.label} className="flex flex-col gap-0.5">
+                      <span
+                        className={cn(
+                          'text-xl font-semibold tabular-nums',
+                          'tone' in item ? item.tone : 'text-foreground',
+                        )}
+                      >
+                        {item.value}
+                      </span>
+                      <span className="text-xs text-muted-foreground">{item.label}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/*
+            Aktivitas terbaru. Dipertahankan, tapi tidak lagi full width — dipindah
+            ke kolom kanan supaya bertumpuk dengan hasil kerja. Nomor tiketnya
+            kini tautan sungguhan; versi lama kehilangan field itu dan hanya
+            menampilkan teks polos "Tiket" tanpa data di belakangnya.
+          */}
+          <Card className="flex min-h-0 flex-col">
+            <CardHeader>
+              <CardTitle className="text-base">Aktivitas Terbaru</CardTitle>
+              <CardDescription>Progres & resolusi terakhir</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loading && activity.length === 0 ? (
+                <Skeleton className="h-[200px] w-full rounded-lg" />
+              ) : activity.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  Belum ada aktivitas
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-3">
+                  {activity.slice(0, ACTIVITY_LIMIT).map((item: HandlerActivity) => (
+                    <li key={`${item.kind}-${item.ticket_no}-${item.at}`} className="flex gap-2.5">
+                      <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs leading-snug">
+                          <Link
+                            href={`/handler/ticket/${item.ticket_no}`}
+                            className="font-medium text-primary hover:underline"
+                          >
+                            {item.ticket_no}
+                          </Link>{' '}
+                          <span className="text-muted-foreground">{item.label}</span>
+                          {item.kind === 'resolution' && item.resolution_no ? (
+                            <span className="text-muted-foreground"> #{item.resolution_no}</span>
+                          ) : null}
+                        </p>
+                        {item.note ? (
+                          <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                            {item.note}
+                          </p>
+                        ) : null}
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">
+                          {formatMoment(item.at)}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }

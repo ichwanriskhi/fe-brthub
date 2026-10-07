@@ -1,7 +1,7 @@
 'use client';
 
 import { use } from 'react';
-import { ApprovalDetail } from '@/components/shared/ApprovalDetail';
+import { FinalApprovalDetail } from '@/components/shared/FinalApprovalDetail';
 
 export default function PersetujuanPenutupanDetailPage({
   params,
@@ -11,6 +11,6 @@ export default function PersetujuanPenutupanDetailPage({
   const { id } = use(params);
 
   return (
-    <ApprovalDetail id={id} stage="FINAL" backHref="/approver/persetujuan-penutupan" />
+    <FinalApprovalDetail id={id} backHref="/approver/persetujuan-penutupan" />
   );
 }

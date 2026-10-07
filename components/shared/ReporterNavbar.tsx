@@ -114,20 +114,18 @@ export function ReporterNavbar() {
         </nav>
 
         <div className="flex shrink-0 items-center gap-1.5">
-          <Button variant="ghost" size="icon-lg" className="relative">
-            <Bell className="size-[1.2rem]" />
+          <Button variant="ghost" size="icon-lg" className="relative" aria-label="Notifikasi">
+            <Bell />
             <span className="absolute right-2 top-2 size-2 rounded-full bg-primary" />
-            <span className="sr-only">Notifikasi</span>
           </Button>
           <ModeToggle />
           <DropdownMenu>
             <DropdownMenuTrigger
-              render={<Button variant="ghost" size="icon" className="rounded-full" />}
+              render={<Button variant="ghost" size="icon" className="rounded-full" aria-label="Menu profil" />}
             >
               <Avatar>
                 <AvatarFallback>{initials}</AvatarFallback>
               </Avatar>
-              <span className="sr-only">Menu profil</span>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuGroup>
@@ -174,7 +172,7 @@ export function ReporterNavbar() {
               key={item.href}
               variant="ghost"
               size="sm"
-              className={cn('flex-1 text-xs font-medium', active && 'bg-primary/10 text-primary')}
+              className={cn('flex-1', active && 'bg-primary/10 text-primary')}
               asChild
             >
               <Link href={item.href}>

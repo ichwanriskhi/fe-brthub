@@ -9,42 +9,35 @@ type StatisticsCardProps = {
   value: string;
   subtitle: string;
   icon: LucideIcon;
-  showTrend?: boolean;
   className?: string;
 };
 
+/**
+ * Kartu KPI: label muted, nilai besar, dan subtitle muted. Warna memakai token
+ * semantik (`muted-foreground`, `muted`, `foreground`) supaya ikut mode
+ * terang/gelap dan konsisten dengan komponen lain. Aksen merah disimpan untuk
+ * kondisi yang butuh perhatian, bukan untuk setiap kartu.
+ */
 export function StatisticsCard({
   label,
   value,
   subtitle,
   icon: Icon,
-  showTrend = false,
   className,
 }: StatisticsCardProps) {
   return (
-    <Card
-      className={cn(
-        'gap-0 rounded-xl p-0 shadow-none',
-        className
-      )}
-    >
+    <Card className={cn('gap-0 rounded-xl p-0 shadow-none', className)}>
       <CardContent className="p-4">
-        {/* Row: Label + Icon */}
         <div className="flex items-start justify-between gap-2">
-          <p className="text-sm font-normal text-gray-500 dark:text-gray-400">{label}</p>
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800">
-            <Icon className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+          <p className="text-sm font-normal text-muted-foreground">{label}</p>
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted">
+            <Icon className="size-4 text-muted-foreground" />
           </div>
         </div>
 
-        {/* Value */}
-        <p className="mt-1.5 text-2xl font-bold text-gray-900 dark:text-gray-100">{value}</p>
+        <p className="mt-1.5 text-2xl font-bold text-foreground">{value}</p>
 
-        {/* Subtitle / Trend */}
-        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-          {showTrend && <span className="mr-1 text-gray-500 dark:text-gray-400">↑</span>}
-          {subtitle}
-        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>
       </CardContent>
     </Card>
   );

@@ -7,6 +7,7 @@ export default function HandlerReworkRequiredPage() {
     <HandlerQueue
       status="REWORK"
       hrefBase="/handler/ticket"
+      linkQuery="?from=rework"
       actionLabel="Revisi"
       emptyTitle="Tidak ada tiket yang perlu direvisi"
       emptyDescription="Tiket yang resolusinya ditolak approver akan kembali ke sini untuk diperbaiki."

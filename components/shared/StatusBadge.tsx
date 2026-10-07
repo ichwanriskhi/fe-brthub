@@ -1,59 +1,75 @@
 'use client';
 
 import { Badge } from '@/components/ui/badge';
+import { DotChip } from '@/components/shared/DotChip';
 import type { TicketStatus, TicketPriority, TicketType } from '@/lib/types/ticket';
-import { CircleCheck, CircleDashed, LoaderCircle, CircleAlert, CircleX, CircleDot, MessageSquarePlus, TriangleAlert, MessageSquareWarning, HelpCircle } from 'lucide-react';
 
-const STATUS_MAP: Record<TicketStatus, { label: string; icon: typeof CircleDot; iconClass: string }> = {
-  OPEN: { label: 'Open', icon: CircleDot, iconClass: 'text-sky-600 dark:text-sky-400' },
-  PENDING_APPROVAL: { label: 'Menunggu Approval', icon: LoaderCircle, iconClass: 'text-indigo-600 dark:text-indigo-400' },
-  IN_PROGRESS: { label: 'Diproses', icon: LoaderCircle, iconClass: 'text-amber-600 dark:text-amber-400' },
-  PENDING_REVIEW: { label: 'Menunggu Review', icon: CircleDashed, iconClass: 'text-violet-600 dark:text-violet-400' },
-  REWORK_REQUIRED: { label: 'Perlu Revisi', icon: CircleAlert, iconClass: 'text-orange-600 dark:text-orange-400' },
-  REJECTED: { label: 'Ditolak', icon: CircleX, iconClass: 'text-destructive' },
-  CLOSED: { label: 'Selesai', icon: CircleCheck, iconClass: 'text-emerald-600 dark:text-emerald-400' },
+const STATUS_MAP: Record<TicketStatus, { label: string; dot: string; title: string }> = {
+  OPEN: { label: 'Open', dot: 'bg-sky-500/70', title: 'Status: Open' },
+  PENDING_APPROVAL: { label: 'Menunggu Approval', dot: 'bg-indigo-500/70', title: 'Status: Menunggu Approval' },
+  IN_PROGRESS: { label: 'Diproses', dot: 'bg-amber-500/70', title: 'Status: Diproses' },
+  PENDING_REVIEW: { label: 'Menunggu Review', dot: 'bg-violet-500/70', title: 'Status: Menunggu Review' },
+  REWORK_REQUIRED: { label: 'Perlu Revisi', dot: 'bg-orange-500/70', title: 'Status: Perlu Revisi' },
+  REJECTED: { label: 'Ditolak', dot: 'bg-destructive/70', title: 'Status: Ditolak' },
+  CLOSED: { label: 'Selesai', dot: 'bg-emerald-500/70', title: 'Status: Selesai' },
 };
 
 export function StatusBadge({ status }: { status: TicketStatus }) {
   const v = STATUS_MAP[status];
   if (!v) return <Badge variant="outline">Unknown</Badge>;
-  const Icon = v.icon;
   return (
-    <Badge variant="outline">
-      <Icon data-icon="inline-start" className={v.iconClass} />
+    <DotChip dotClass={v.dot} title={v.title}>
       {v.label}
-    </Badge>
+    </DotChip>
   );
 }
 
-const PRIORITY_STYLE: Record<TicketPriority, { label: string; cls: string }> = {
-  A: { label: 'A', cls: 'border-destructive/50 bg-destructive/10 text-destructive' },
-  B: { label: 'B', cls: 'border-amber-600/50 bg-amber-500/10 text-amber-700 dark:text-amber-400' },
-  C: { label: 'C', cls: 'border-sky-600/50 bg-sky-500/10 text-sky-700 dark:text-sky-400' },
+const ACTIVE_STYLE: Record<'active' | 'inactive', { label: string; dot: string }> = {
+  active: { label: 'Aktif', dot: 'bg-emerald-500/70' },
+  inactive: { label: 'Nonaktif', dot: 'bg-muted-foreground/40' },
 };
 
-export function PriorityBadge({ priority }: { priority: TicketPriority | null }) {
-  if (!priority) return null;
-  const v = PRIORITY_STYLE[priority];
-  if (!v) return <Badge variant="outline">{priority}</Badge>;
-  return <Badge variant="outline" className={v.cls}>{v.label}</Badge>;
+/** Status aktif/nonaktif untuk master data & pelanggan. */
+export function ActiveBadge({ isActive }: { isActive: boolean }) {
+  const v = ACTIVE_STYLE[isActive ? 'active' : 'inactive'];
+  return <DotChip dotClass={v.dot}>{v.label}</DotChip>;
 }
 
-const TYPE_MAP: Record<TicketType, { label: string; icon: typeof CircleDot; iconClass: string }> = {
-  REQUEST: { label: 'Request', icon: MessageSquarePlus, iconClass: 'text-sky-600 dark:text-sky-400' },
-  INCIDENT: { label: 'Incident', icon: TriangleAlert, iconClass: 'text-orange-600 dark:text-orange-400' },
-  COMPLAINT: { label: 'Complaint', icon: MessageSquareWarning, iconClass: 'text-violet-600 dark:text-violet-400' },
-  INQUIRY: { label: 'Inquiry', icon: HelpCircle, iconClass: 'text-emerald-600 dark:text-emerald-400' },
+const PRIORITY_STYLE: Record<TicketPriority, { label: string; dot: string; title: string }> = {
+  A: { label: 'A', dot: 'bg-destructive/70', title: 'Prioritas A — Tinggi' },
+  B: { label: 'B', dot: 'bg-amber-500/70', title: 'Prioritas B — Normal' },
+  C: { label: 'C', dot: 'bg-sky-500/70', title: 'Prioritas C — Rendah' },
 };
 
-export function TypeBadge({ ticketType }: { ticketType: TicketType }) {
-  const v = TYPE_MAP[ticketType];
-  if (!v) return <Badge variant="outline">Unknown</Badge>;
-  const Icon = v.icon;
+export function PriorityBadge({ priority }: { priority: string | null }) {
+  if (!priority) return null;
+  // Code baru dari master data belum punya gaya — tampilkan badge polos berisi
+  // code-nya, bukan disembunyikan atau dipaksa ke tier lain.
+  const v = PRIORITY_STYLE[priority as TicketPriority];
+  if (!v) return <Badge variant="outline">{priority}</Badge>;
   return (
-    <Badge variant="outline">
-      <Icon data-icon="inline-start" className={v.iconClass} />
+    <DotChip dotClass={v.dot} title={v.title}>
       {v.label}
-    </Badge>
+    </DotChip>
+  );
+}
+
+const TYPE_MAP: Record<TicketType, { label: string; dot: string; title: string }> = {
+  REQUEST: { label: 'Request', dot: 'bg-sky-500/70', title: 'Tipe: Request' },
+  INCIDENT: { label: 'Incident', dot: 'bg-orange-500/70', title: 'Tipe: Incident' },
+  COMPLAINT: { label: 'Complaint', dot: 'bg-violet-500/70', title: 'Tipe: Complaint' },
+  INQUIRY: { label: 'Inquiry', dot: 'bg-emerald-500/70', title: 'Tipe: Inquiry' },
+};
+
+export function TypeBadge({ ticketType }: { ticketType: string | null }) {
+  // Sama seperti PriorityBadge: code tak dikenal tampil apa adanya.
+  // "Unknown" menyembunyikan informasi yang sebenarnya ada di data.
+  if (!ticketType) return null;
+  const v = TYPE_MAP[ticketType as TicketType];
+  if (!v) return <Badge variant="outline">{ticketType}</Badge>;
+  return (
+    <DotChip dotClass={v.dot} title={v.title}>
+      {v.label}
+    </DotChip>
   );
 }

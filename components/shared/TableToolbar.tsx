@@ -48,6 +48,12 @@ interface TableToolbarProps {
   dateRange?: DateRange | undefined;
   onDateRangeChange?: (range: DateRange | undefined) => void;
   dateLabel?: string;
+  /**
+   * Kontrol tambahan di baris search, setelah tombol Filter — mis. `ColumnToggle`.
+   * Ditaruh di dalam toolbar (bukan di parent) supaya tinggi & alignment-nya
+   * otomatis sama dengan tombol Filter.
+   */
+  action?: React.ReactNode;
 }
 
 /**
@@ -113,6 +119,7 @@ export function TableToolbar({
   dateRange,
   onDateRangeChange,
   dateLabel = 'Tanggal Pembuatan Laporan',
+  action,
 }: TableToolbarProps) {
   const [filterOpen, setFilterOpen] = useState(false);
 
@@ -160,10 +167,9 @@ export function TableToolbar({
           <Button
             variant={activeFilterCount > 0 ? 'default' : 'outline'}
             size="sm"
-            className="gap-1.5"
             onClick={() => setFilterOpen(true)}
           >
-            <SlidersHorizontal className="size-4" />
+            <SlidersHorizontal data-icon="inline-start" />
             <span className="hidden sm:inline">Filter</span>
             {activeFilterCount > 0 && (
               <Badge variant="secondary" className="ml-0.5 size-5 justify-center rounded-full px-1 text-[10px]">
@@ -172,6 +178,8 @@ export function TableToolbar({
             )}
           </Button>
         )}
+
+        {action && <div className="hidden md:contents">{action}</div>}
       </div>
 
       {/* Active filter chips */}
@@ -281,16 +289,16 @@ export function TableToolbar({
               size="sm"
               onClick={resetAll}
               disabled={activeFilterCount === 0}
-              className="gap-1.5 text-muted-foreground"
+              className="text-muted-foreground"
             >
-              <X className="size-3.5" />
+              <X data-icon="inline-start" />
               Reset
             </Button>
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="sm" onClick={() => setFilterOpen(false)}>
                 Batal
               </Button>
-              <Button size="sm" className="gap-1.5" onClick={() => setFilterOpen(false)}>
+              <Button size="sm" onClick={() => setFilterOpen(false)}>
                 Terapkan
                 {activeFilterCount > 0 && ` (${activeFilterCount})`}
               </Button>

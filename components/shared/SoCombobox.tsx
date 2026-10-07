@@ -1,15 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Check, ChevronsUpDown, Search, Loader2 } from 'lucide-react';
+import { Check, ChevronsUpDown, Search } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
 import { cn } from 'cn';
 
 /**
- * Ambil daftar Sales Order dari SAP monitor-list-v2 dan flatten ke satu list.
+ * Ambil daftar Sales Order dari SAP melalui BE (server-to-server ke SAP).
  *
- * Dipanggil lewat rewrite Next.js (`/api/sap/*`) — request server-to-server,
- * jadi CORS SAP tidak berlaku dan IP internal tidak ter-expose di browser.
+ * Response di-cache 5 menit di sisi server, sehingga permintaan berulang
+ * tidak membebani SAP.
  */
 export interface SoOrder {
   soNumber: string;
@@ -19,8 +20,8 @@ export interface SoOrder {
   totalItems?: number;
 }
 
-const SAP_API_URL =
-  process.env.NEXT_PUBLIC_SAP_API_URL || '/api/sap/order/monitor-list-v2';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+const SAP_MONITOR_URL = `${API_BASE}/api/auth/sap/order/monitor-list`;
 
 let cache: SoOrder[] | null = null;
 let inflight: Promise<SoOrder[]> | null = null;
@@ -30,12 +31,23 @@ export async function fetchSoOrders(): Promise<SoOrder[]> {
   if (inflight) return inflight;
 
   inflight = (async () => {
-    const res = await fetch(SAP_API_URL, { headers: { Accept: 'application/json' } });
+    const token = typeof window !== 'undefined'
+      ? (localStorage.getItem('brthub_token') || localStorage.getItem('auth_token'))
+      : null;
+
+    const res = await fetch(SAP_MONITOR_URL, {
+      headers: {
+        Accept: 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
     if (!res.ok) throw new Error(`SAP API error: ${res.status}`);
     const json = await res.json();
 
+    // BE membungkus response dalam { success, data }; data berisi payload SAP asli
+    const raw = json?.success && json.data ? json.data : json;
     const out: SoOrder[] = [];
-    const groups = json?.groups ?? {};
+    const groups = raw?.groups ?? {};
     for (const key of Object.keys(groups)) {
       const orders = groups[key]?.orders ?? [];
       for (const o of orders) {
@@ -130,7 +142,7 @@ export function SoCombobox({
             <span className={cn('truncate', !selected && 'text-muted-foreground')}>
               {selected ? `${selected.soNumber}` : placeholder}
             </span>
-            <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
+            <ChevronsUpDown data-icon="inline-end" className="opacity-50" />
           </Button>
         }
       />
@@ -144,7 +156,7 @@ export function SoCombobox({
             className="h-9 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
             aria-label="Cari nomor SO"
           />
-          {loading && <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />}
+          {loading && <Spinner className="shrink-0 text-muted-foreground" />}
         </div>
         <div className="max-h-64 overflow-y-auto p-1">
           {error ? (
@@ -184,7 +196,7 @@ export function SoCombobox({
         </div>
         {filtered.length > maxShown && (
           <div className="border-t px-3 py-1.5 text-center text-xs text-muted-foreground">
-            Menampilkan {maxShown} dari {filtered.length} — persempit pencarian
+            Menampilkan {maxShown} dari {filtered.length} - persempit pencarian
           </div>
         )}
       </PopoverContent>

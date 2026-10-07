@@ -1,5 +1,11 @@
 import { toTicket } from '@/lib/api/tickets';
-import type { Ticket, TicketAttachment } from '@/lib/types/ticket';
+import type {
+  Ticket,
+  TicketAttachment,
+  TicketStatus,
+  TicketPriority,
+  TicketType,
+} from '@/lib/types/ticket';
 import { authenticatedFetch } from './fetch-wrapper';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
@@ -20,6 +26,27 @@ function string(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : fallback;
 }
 
+/**
+ * ISO backend → "10 Sep 2026, 09:15" (id-ID).
+ *
+ * Sama dengan `formatTimestamp` di lib/api/tickets.ts dan
+ * lib/api/ticket-interactions.ts — sengaja disalin, bukan diimpor, supaya
+ * normalizer handler tidak menarik dependensi ke file normalizer peran lain.
+ */
+function formatTimestamp(value: unknown): string {
+  const raw = string(value);
+  if (!raw) return '';
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  return date.toLocaleString('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 /** Status tiket yang sudah dinormalisasi dari respons backend */
 export type HandlerTicketStatus = 'NEED_ACTION' | 'WAITING_REVIEW' | 'REWORK' | 'HISTORY';
 
@@ -33,6 +60,11 @@ export interface HandlerListResult {
 export interface HandlerProgressEntry {
   id: string;
   note: string;
+  /**
+   * Sudah diformat sebagai "10 Sep 2026, 09:15" (id-ID) — bukan ISO.
+   * Jangan di-parse ulang dengan `new Date()`; string `id-ID` tidak bisa
+   * di-parse dan hasilnya `NaN`. Tampilkan apa adanya.
+   */
   timestamp: string;
   actorName?: string;
   attachments: TicketAttachment[];
@@ -70,7 +102,7 @@ export function toHandlerTicket(value: unknown): Ticket {
     return {
       id: string(row.id),
       note: string(row.note),
-      timestamp: string(row.created_at, string(row.submitted_at)),
+      timestamp: formatTimestamp(row.created_at ?? row.submitted_at),
       actorName: string(record(row.actor).full_name) || undefined,
       attachments: atts.map((a): TicketAttachment => {
         const att = record(a);
@@ -162,14 +194,38 @@ function pageMeta(payload: unknown): { total: number; currentPage: number; lastP
   };
 }
 
+/** Opsi `getHandlerTickets` — semua diteruskan sebagai query string. */
+export interface HandlerListParams {
+  status: HandlerTicketStatus;
+  page?: number;
+  per_page?: number;
+  search?: string;
+  statusCode?: TicketStatus;
+  priority?: TicketPriority;
+  ticketType?: TicketType;
+  category?: string;
+  dateFrom?: string; // YYYY-MM-DD
+  dateTo?: string; // YYYY-MM-DD
+}
+
 /** Daftar tiket handler yang sedang login, per kelompok status. */
 export async function getHandlerTickets(
-  status: HandlerTicketStatus,
-  page = 1,
+  params: HandlerListParams,
 ): Promise<HandlerListResult> {
+  const searchParams = new URLSearchParams({ status: params.status });
+  if (params.page) searchParams.set('page', String(params.page));
+  if (params.per_page) searchParams.set('per_page', String(params.per_page));
+  if (params.search) searchParams.set('search', params.search);
+  if (params.statusCode) searchParams.set('status_code', params.statusCode);
+  if (params.priority) searchParams.set('priority_code', params.priority);
+  if (params.ticketType) searchParams.set('ticket_type_code', params.ticketType);
+  if (params.category) searchParams.set('category_id', params.category);
+  if (params.dateFrom) searchParams.set('date_from', params.dateFrom);
+  if (params.dateTo) searchParams.set('date_to', params.dateTo);
+
   const token = await authToken();
   const response = await authenticatedFetch(
-    `/api/auth/handler/tickets?status=${status}&page=${page}`,
+    `/api/auth/handler/tickets?${searchParams.toString()}`,
     { headers: { Accept: 'application/json' } },
   );
   const payload: unknown = await response.json().catch(() => null);
@@ -310,11 +366,37 @@ export async function getUnitEmployees(
   });
 }
 
+/** Opsi `getUnitTickets` — semua diteruskan sebagai query string. */
+export interface UnitTicketsParams {
+  page?: number;
+  per_page?: number;
+  search?: string;
+  statusCode?: TicketStatus;
+  priority?: TicketPriority;
+  ticketType?: TicketType;
+  category?: string;
+  dateFrom?: string; // YYYY-MM-DD
+  dateTo?: string; // YYYY-MM-DD
+}
+
 /** Antrean tiket unit (IN_PROGRESS, sudah diterima departemen ini). */
-export async function getUnitTickets(page = 1): Promise<HandlerListResult> {
+export async function getUnitTickets(
+  params: UnitTicketsParams = {},
+): Promise<HandlerListResult> {
+  const searchParams = new URLSearchParams();
+  if (params.page) searchParams.set('page', String(params.page));
+  if (params.per_page) searchParams.set('per_page', String(params.per_page));
+  if (params.search) searchParams.set('search', params.search);
+  if (params.statusCode) searchParams.set('status_code', params.statusCode);
+  if (params.priority) searchParams.set('priority_code', params.priority);
+  if (params.ticketType) searchParams.set('ticket_type_code', params.ticketType);
+  if (params.category) searchParams.set('category_id', params.category);
+  if (params.dateFrom) searchParams.set('date_from', params.dateFrom);
+  if (params.dateTo) searchParams.set('date_to', params.dateTo);
+
   const token = await authToken();
   const response = await authenticatedFetch(
-    `/api/auth/unit/tickets?page=${page}`,
+    `/api/auth/unit/tickets?${searchParams.toString()}`,
     { headers: { Accept: 'application/json' } },
   );
   const payload: unknown = await response.json().catch(() => null);
@@ -367,6 +449,25 @@ export async function getUnitHistory(page = 1): Promise<HandlerListResult> {
   const meta = pageMeta(payload);
 
   return { data, ...meta };
+}
+
+/**
+ * Seluruh riwayat penugasan (semua halaman digabung datar).
+ *
+ * Dipakai halaman riwayat unit: barisnya diturunkan dari `handlerAssignments`
+ * sehingga satu tiket bisa jadi beberapa baris, dan filter per handler /
+ * status penugasan hanya bisa bekerja kalau seluruh data ada di client.
+ */
+export async function getAllUnitHistory(): Promise<Ticket[]> {
+  const first = await getUnitHistory(1);
+  const pages: Ticket[] = [...first.data];
+
+  for (let page = 2; page <= first.lastPage; page += 1) {
+    const next = await getUnitHistory(page);
+    pages.push(...next.data);
+  }
+
+  return pages;
 }
 
 /** Assign handler ke tiket (dipilih oleh unit). */

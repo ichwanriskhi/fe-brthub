@@ -1,51 +1,95 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import type { ColumnVisibilityState } from '@tanstack/react-table';
+import { cn } from '@/lib/utils';
 import { getAdminEmployees, createAdminEmployee, updateAdminEmployee, sendSetupPasswordLink, sendResetPasswordLink, appRolesToDbNames, type EmployeeProfile } from '@/lib/api/admin-employees';
 import { getMasterDataAll } from '@/lib/api/master';
 import type { EmployeeEntry, AccountStatus, AppRole } from '@/lib/types/admin';
 import { APP_ROLES, ASSIGNABLE_APP_ROLES } from '@/lib/types/admin';
 import { TableToolbar, type TableFilterValues } from '@/components/shared/TableToolbar';
+import { DataTable, createColumnHelper, type ColumnDef } from '@/components/shared/DataTable';
+import type { DataTableFeatures } from '@/components/shared/data-table-features';
+import { DataTablePagination } from '@/components/shared/DataTablePagination';
+import { TableSkeleton } from '@/components/shared/TableSkeleton';
+import { ColumnToggle } from '@/components/shared/ColumnToggle';
+import { DotChip } from '@/components/shared/DotChip';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from '@/components/ui/pagination';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Field, FieldLabel } from '@/components/ui/field';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, Pencil, MailCheck, KeyRound, ExternalLink } from 'lucide-react';
+import { Plus, Pencil, MailCheck, KeyRound, ExternalLink, Users } from 'lucide-react';
 import { toast } from 'sonner';
 
-const ITEMS_PER_PAGE = 10;
-
-const ACCOUNT_STATUS_LABEL: Record<AccountStatus, { label: string; className: string }> = {
-  ACTIVE: { label: 'Aktif', className: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
-  NOT_ACTIVATED: { label: 'Belum Aktivasi', className: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
-  NO_ACCOUNT: { label: 'Belum Punya Akun', className: 'bg-muted/50 text-muted-foreground' },
+const ACCOUNT_STATUS_LABEL: Record<AccountStatus, { label: string; dot: string }> = {
+  ACTIVE: { label: 'Aktif', dot: 'bg-emerald-500/70' },
+  NOT_ACTIVATED: { label: 'Belum Aktivasi', dot: 'bg-amber-500/70' },
+  NO_ACCOUNT: { label: 'Belum Punya Akun', dot: 'bg-muted-foreground/40' },
 };
 
-const ROLE_LABEL: Record<AppRole, { label: string; className: string }> = {
-  ADMIN:    { label: 'Admin',    className: 'bg-violet-500/10 text-violet-600 dark:text-violet-400' },
-  REVIEWER: { label: 'Reviewer', className: 'bg-sky-500/10 text-sky-600 dark:text-sky-400' },
-  HANDLER:  { label: 'Handler',  className: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
-  UNIT:     { label: 'Unit',     className: 'bg-orange-500/10 text-orange-600 dark:text-orange-400' },
-  MANAGER:  { label: 'Manager',  className: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
-  STAFF:    { label: 'Staff',    className: 'bg-muted/50 text-muted-foreground' },
+function AccountStatusBadge({ status }: { status: AccountStatus }) {
+  const v = ACCOUNT_STATUS_LABEL[status];
+  return <DotChip dotClass={v.dot}>{v.label}</DotChip>;
+}
+
+const ROLE_LABEL: Record<AppRole, { label: string; dot: string }> = {
+  ADMIN:    { label: 'Admin',    dot: 'bg-violet-500/70' },
+  REVIEWER: { label: 'Reviewer', dot: 'bg-sky-500/70' },
+  HANDLER:  { label: 'Handler',  dot: 'bg-amber-500/70' },
+  UNIT:     { label: 'Unit',     dot: 'bg-orange-500/70' },
+  MANAGER:  { label: 'Manager',  dot: 'bg-emerald-500/70' },
+  STAFF:    { label: 'Staff',    dot: 'bg-muted-foreground/50' },
 };
 
+/**
+ * Role pertama ditampilkan penuh; sisanya diringkas jadi "+N" yang memunculkan
+ * daftar role lengkap saat diklik.
+ */
 function RoleBadges({ roles }: { roles: AppRole[] }) {
   const list = roles.length > 0 ? roles : (['STAFF'] as AppRole[]);
+  const [primary, ...rest] = list;
+  const primaryMeta = ROLE_LABEL[primary] ?? { label: primary, dot: ROLE_LABEL.STAFF.dot };
   return (
-    <div className="flex flex-wrap gap-1">
-      {list.map((role) => (
-        <Badge key={role} className={ROLE_LABEL[role]?.className ?? ROLE_LABEL.STAFF.className}>
-          {ROLE_LABEL[role]?.label ?? role}
-        </Badge>
-      ))}
+    <div className="flex flex-wrap items-center gap-1">
+      <DotChip dotClass={primaryMeta.dot}>{primaryMeta.label}</DotChip>
+      {rest.length > 0 && (
+        <Popover>
+          <PopoverTrigger
+            render={<DotChip interactive aria-label={`Lihat ${rest.length} role lainnya`} />}
+          >
+            +{rest.length}
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-40 p-2">
+            <p className="px-1 pb-1.5 text-[11px] font-medium text-muted-foreground">
+              Role lainnya
+            </p>
+            <ul className="space-y-1">
+              {rest.map((role) => {
+                const meta = ROLE_LABEL[role] ?? { label: role, dot: ROLE_LABEL.STAFF.dot };
+                return (
+                  <li key={role}>
+                    <DotChip dotClass={meta.dot} className="w-full justify-start">
+                      {meta.label}
+                    </DotChip>
+                  </li>
+                );
+              })}
+            </ul>
+          </PopoverContent>
+        </Popover>
+      )}
     </div>
   );
 }
@@ -74,6 +118,8 @@ function toEntry(e: EmployeeProfile): EmployeeEntry {
   };
 }
 
+const columnHelper = createColumnHelper<DataTableFeatures, EmployeeEntry>();
+
 export default function AdminPegawaiPage() {
   const [search, setSearch] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState<string>('');
@@ -84,6 +130,8 @@ export default function AdminPegawaiPage() {
   const [departments, setDepartments] = useState<{ id: string; name: string; isActive: boolean }[]>([]);
   const [positions, setPositions] = useState<{ id: string; name: string; hierarchyLevel: number; isActive: boolean; departmentId?: string }[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const [perPage, setPerPage] = useState(10);
+  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>({});
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<EmployeeEntry | null>(null);
   const [saving, setSaving] = useState(false);
@@ -119,27 +167,74 @@ export default function AdminPegawaiPage() {
     return matchesSearch && matchesDept && matchesStatus && matchesRole;
   });
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+  const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
   const safePage = Math.min(currentPage, totalPages);
-  const paginated = filtered.slice((safePage - 1) * ITEMS_PER_PAGE, safePage * ITEMS_PER_PAGE);
-
-  const getPaginationItems = () => {
-    const items: (number | 'ellipsis')[] = [];
-    const total = totalPages;
-    const current = safePage;
-    if (total <= 5) {
-      for (let i = 1; i <= total; i++) items.push(i);
-    } else if (current <= 3) {
-      items.push(1, 2, 3, 'ellipsis', total);
-    } else if (current >= total - 2) {
-      items.push(1, 'ellipsis', total - 2, total - 1, total);
-    } else {
-      items.push(1, 'ellipsis', current - 1, current, current + 1, 'ellipsis', total);
-    }
-    return items;
-  };
+  const paginated = filtered.slice((safePage - 1) * perPage, safePage * perPage);
 
   const goToPage = (p: number) => setCurrentPage(Math.min(Math.max(1, p), totalPages));
+
+  const columns: ColumnDef<DataTableFeatures, EmployeeEntry>[] = columnHelper.columns([
+    columnHelper.accessor('employeeNumber', {
+      header: 'Emp No',
+      cell: ({ row }) => (
+        <span className="font-mono text-xs whitespace-nowrap">{row.original.employeeNumber}</span>
+      ),
+    }),
+    columnHelper.accessor('name', {
+      header: 'Nama',
+      cell: ({ row }) => (
+        <div className="space-y-0.5">
+          <p className="text-sm font-medium">{row.original.name}</p>
+          <p className="text-xs text-muted-foreground">{row.original.email ?? row.original.phone}</p>
+        </div>
+      ),
+    }),
+    columnHelper.accessor('departmentName', {
+      header: 'Departemen',
+      cell: ({ row }) => <span className="text-sm">{row.original.departmentName}</span>,
+    }),
+    columnHelper.accessor('positionName', {
+      header: 'Posisi',
+      cell: ({ row }) => <span className="text-sm">{row.original.positionName}</span>,
+    }),
+    columnHelper.display({
+      id: 'role',
+      header: 'Role',
+      cell: ({ row }) => <RoleBadges roles={row.original.roles} />,
+    }),
+    columnHelper.accessor('phone', {
+      header: 'Telepon',
+      cell: ({ row }) => (
+        <span className="font-mono text-xs text-muted-foreground">{row.original.phone}</span>
+      ),
+    }),
+    columnHelper.display({
+      id: 'status',
+      header: 'Status Akun',
+      cell: ({ row }) => <AccountStatusBadge status={row.original.accountStatus} />,
+    }),
+    columnHelper.display({
+      id: 'laporan',
+      header: 'Laporan',
+      cell: ({ row }) => (
+        <a
+          href={`/admin/ticket/monitoring?reporter=${row.original.id}`}
+          className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
+        >
+          Lihat tiket
+          <ExternalLink className="size-3" />
+        </a>
+      ),
+    }),
+    columnHelper.display({
+      id: 'aksi',
+      header: () => <div className="text-right">Aksi</div>,
+      cell: ({ row }) => (
+        <div className="flex items-center justify-end gap-1">{actionButtons(row.original)}</div>
+      ),
+      enableHiding: false,
+    }),
+  ]);
 
   const loadEmployees = async () => {
     setLoading(true);
@@ -299,9 +394,8 @@ export default function AdminPegawaiPage() {
                 onClick={() => sendResetLink(e)}
                 disabled={pendingLink === `${e.userId}:reset`}
                 aria-label="Kirim link reset password"
-                className={sm ? 'h-7 gap-1.5 text-xs' : ''}
               >
-                <KeyRound className="size-3.5" />
+                <KeyRound data-icon="inline-start" />
                 {sm && (pendingLink === `${e.userId}:reset` ? 'Mengirim…' : 'Reset')}
               </Button>
             }
@@ -318,9 +412,8 @@ export default function AdminPegawaiPage() {
                 onClick={() => sendSetupLink(e)}
                 disabled={pendingLink === `${e.userId}:setup`}
                 aria-label="Kirim link setup password"
-                className={sm ? 'h-7 gap-1.5 text-xs' : ''}
               >
-                <MailCheck className="size-3.5" />
+                <MailCheck data-icon="inline-start" />
                 {sm && (pendingLink === `${e.userId}:setup` ? 'Mengirim…' : 'Setup')}
               </Button>
             }
@@ -333,9 +426,8 @@ export default function AdminPegawaiPage() {
         size={sm ? 'sm' : 'icon'}
         onClick={() => openEdit(e)}
         aria-label={`Ubah ${e.name}`}
-        className={sm ? 'h-7 gap-1.5 text-xs' : ''}
       >
-        <Pencil className="size-3.5" />
+        <Pencil data-icon="inline-start" />
         {sm && 'Ubah'}
       </Button>
     </>
@@ -376,6 +468,13 @@ export default function AdminPegawaiPage() {
               if (key === 'status') setStatusFilter(value ?? '');
               if (key === 'role') setRoleFilter(value ?? '');
             }}
+            action={
+              <ColumnToggle
+                columns={columns}
+                visibility={columnVisibility}
+                onVisibilityChange={setColumnVisibility}
+              />
+            }
           />
         </CardContent>
 
@@ -387,7 +486,12 @@ export default function AdminPegawaiPage() {
         </div>
 
         {/* Mobile card view */}
-        <div className="md:hidden px-4 pb-4">
+        <div
+          className={cn(
+            'px-4 pb-4 transition-opacity md:hidden',
+            loading && paginated.length > 0 && 'pointer-events-none opacity-50',
+          )}
+        >
           {paginated.map((e) => (
             <div key={e.id} className="mb-3 rounded-lg border bg-card py-4 last:mb-0">
               <div className="px-4">
@@ -410,9 +514,7 @@ export default function AdminPegawaiPage() {
                   </div>
                     <div className="flex shrink-0 flex-col items-end gap-1.5">
                     <RoleBadges roles={e.roles} />
-                    <Badge className={ACCOUNT_STATUS_LABEL[e.accountStatus].className}>
-                      {ACCOUNT_STATUS_LABEL[e.accountStatus].label}
-                    </Badge>
+                    <AccountStatusBadge status={e.accountStatus} />
                   </div>
                 </div>
                 <div className="mt-3 flex items-center justify-end gap-1">
@@ -422,101 +524,63 @@ export default function AdminPegawaiPage() {
             </div>
           ))}
           {paginated.length === 0 && (
-            <p className="py-10 text-center text-sm text-muted-foreground">
-              Tidak ada pegawai yang ditemukan.
-            </p>
+            <Empty className="border-0 py-10">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Users />
+                </EmptyMedia>
+                <EmptyTitle>Tidak ada pegawai yang ditemukan</EmptyTitle>
+                <EmptyDescription>
+                  Ubah filter atau kata kunci pencarian untuk melihat pegawai lain.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           )}
         </div>
 
         {/* Desktop table */}
-        <div className="hidden md:block">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="bg-muted/50 px-6 py-3">Emp No</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Nama</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Departemen</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Posisi</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Role</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Telepon</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Status Akun</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3">Laporan</TableHead>
-                <TableHead className="bg-muted/50 px-6 py-3 text-right">Aksi</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paginated.map((e) => (
-                <TableRow key={e.id}>
-                  <TableCell className="px-6 py-3 font-mono text-xs whitespace-nowrap">
-                    {e.employeeNumber}
-                  </TableCell>
-                  <TableCell className="px-6 py-3">
-                    <div className="space-y-0.5">
-                      <p className="text-sm font-medium">{e.name}</p>
-                      <p className="text-xs text-muted-foreground">{e.email ?? e.phone}</p>
-                    </div>
-                  </TableCell>
-                  <TableCell className="px-6 py-3 text-sm">{e.departmentName}</TableCell>
-                  <TableCell className="px-6 py-3 text-sm">{e.positionName}</TableCell>
-                  <TableCell className="px-6 py-3">
-                    <RoleBadges roles={e.roles} />
-                  </TableCell>
-                  <TableCell className="px-6 py-3 font-mono text-xs text-muted-foreground">{e.phone}</TableCell>
-                  <TableCell className="px-6 py-3">
-                    <Badge className={ACCOUNT_STATUS_LABEL[e.accountStatus].className}>
-                      {ACCOUNT_STATUS_LABEL[e.accountStatus].label}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="px-6 py-3">
-                    <a
-                      href={`/admin/ticket/monitoring?reporter=${e.id}`}
-                      className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
-                    >
-                      Lihat tiket
-                      <ExternalLink className="size-3" />
-                    </a>
-                  </TableCell>
-                  <TableCell className="px-6 py-3 text-right">
-                    <div className="flex items-center gap-1">
-                      {actionButtons(e)}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {paginated.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={9} className="px-6 py-10 text-center text-sm text-muted-foreground">
-                    Tidak ada pegawai yang ditemukan.
-                  </TableCell>
-                </TableRow>
+        <div className="hidden px-4 pb-4 md:block">
+          {loading && paginated.length === 0 ? (
+            <TableSkeleton />
+          ) : (
+            <DataTable
+              mode="server"
+              columns={columns}
+              data={paginated}
+              isPending={loading}
+              showRowNumbers
+              rowNumberOffset={(safePage - 1) * perPage}
+              columnVisibility={columnVisibility}
+              onColumnVisibilityChange={setColumnVisibility}
+              empty={(
+                <Empty className="border-0 py-14">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <Users />
+                    </EmptyMedia>
+                    <EmptyTitle>Tidak ada pegawai yang ditemukan</EmptyTitle>
+                    <EmptyDescription>
+                      Ubah filter atau kata kunci pencarian untuk melihat pegawai lain.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
               )}
-            </TableBody>
-          </Table>
+              footer={() => (
+                <DataTablePagination
+                  page={safePage}
+                  lastPage={totalPages}
+                  total={filtered.length}
+                  perPage={perPage}
+                  onPageChange={goToPage}
+                  onPerPageChange={(n) => {
+                    setPerPage(n);
+                    setCurrentPage(1);
+                  }}
+                />
+              )}
+            />
+          )}
         </div>
-
-        {totalPages > 1 && (
-          <div className="border-t px-6 py-4">
-            <Pagination className="mx-0 w-auto justify-end">
-              <PaginationPrevious onClick={() => goToPage(safePage - 1)} />
-              <PaginationContent>
-                {getPaginationItems().map((item, i) =>
-                  item === 'ellipsis' ? (
-                    <PaginationItem key={`e-${i}`}>
-                      <PaginationEllipsis />
-                    </PaginationItem>
-                  ) : (
-                    <PaginationItem key={item}>
-                      <PaginationLink isActive={item === safePage} onClick={() => goToPage(item as number)}>
-                        {item}
-                      </PaginationLink>
-                    </PaginationItem>
-                  )
-                )}
-              </PaginationContent>
-              <PaginationNext onClick={() => goToPage(safePage + 1)} />
-            </Pagination>
-          </div>
-        )}
       </Card>
 
       {/* Add / Edit pegawai dialog */}

@@ -18,7 +18,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const expiresIn = Number(body?.expires_in) > 0 ? Number(body.expires_in) : 60 * 60 * 8;
+  // Umur cookie = ceiling sesi IdP (24 jam), BUKAN umur access token.
+  // Token diperpanjang diam-diam via refresh, tapi cookie tidak tersentuh —
+  // bila cookie mati duluan (mis. 1 jam dari expires_in), proxy menendang
+  // sesi yang sebenarnya masih valid. 24 jam = batas absolut sesi yang sama.
+  const SESSION_COOKIE_MAX_AGE = 24 * 60 * 60;
 
   const response = NextResponse.json({ success: true });
   response.cookies.set({
@@ -28,7 +32,7 @@ export async function POST(request: NextRequest) {
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
     path: '/',
-    maxAge: expiresIn,
+    maxAge: SESSION_COOKIE_MAX_AGE,
   });
 
   return response;

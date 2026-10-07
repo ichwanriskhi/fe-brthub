@@ -8,20 +8,28 @@ import { ArrowRight } from 'lucide-react';
 
 const STEPS = [
   {
-    title: 'Pelaporan & verifikasi',
-    body: 'Pelapor memasukkan nomor HP, menerima kode OTP, lalu mengisi detail kendala beserta lampiran pendukung. Tidak perlu membuat akun.',
+    title: 'Pelaporan',
+    body: 'Pelapor memverifikasi identitas menggunakan nomor HP melalui kode OTP, lalu mengisi detail kendala serta mengunggah lampiran pendukung.',
   },
   {
     title: 'Tinjauan awal',
-    body: 'Reviewer memeriksa kelengkapan laporan, menyempurnakan kategori dan subkategori, lalu menetapkan prioritas serta unit yang menangani.',
+    body: 'Reviewer memverifikasi keabsahan dan kelengkapan laporan, menyempurnakan, serta menetapkan skala prioritas, Approver, dan unit tujuan penanganan.',
   },
   {
-    title: 'Penanganan unit',
-    body: 'Unit terkait mengerjakan perbaikan di lapangan, mengunggah bukti penanganan, dan mencatat tindakan yang dilakukan pada tiket.',
+    title: 'Persetujuan awal',
+    body: 'Approver meninjau dan menyetujui rencana penanganan. Jika disetujui, laporan diteruskan ke unit kerja; jika ditolak, laporan dihentikan/ditutup dan tidak dilanjutkan ke lapangan',
   },
   {
-    title: 'Tinjauan akhir',
-    body: 'Reviewer menilai hasil penanganan. Tiket ditutup bila sesuai, atau dikembalikan ke unit bila masih perlu perbaikan.',
+    title: 'Penugasan handler',
+    body: 'Unit kerja tujuan menunjuk petugas (Handler) yang akan mengeksekusi laporan.',
+  },
+  {
+    title: 'Penanganan lapangan',
+    body: 'Handler melaksanakan tindakan perbaikan di lapangan, mengunggah bukti penyelesaian, serta mengajukan draft resolusi beserta ringkasan hasil pekerjaan.',
+  },
+  {
+    title: 'Persetujuan penutupan',
+    body: 'Approver mengevaluasi resolusi dan bukti pekerjaan yang diajukan.',
   },
 ];
 
@@ -44,10 +52,10 @@ export default function LandingPage() {
 
           <div className="flex shrink-0 items-center gap-2">
             <ModeToggle />
-            <Button variant="ghost" size="sm" className="hidden font-medium sm:inline-flex" asChild>
-              <Link href="/login">Masuk Pegawai</Link>
+            <Button variant="ghost" size="sm" className="hidden sm:inline-flex" asChild>
+              <Link href="/login">Masuk Petugas</Link>
             </Button>
-            <Button size="sm" className="font-medium" asChild>
+            <Button size="sm" asChild>
               <Link href="/verifikasi">
                 <span className="sm:hidden">Lapor</span>
                 <span className="hidden sm:inline">Lapor Gangguan</span>
@@ -68,9 +76,15 @@ export default function LandingPage() {
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-3">
-            <Button size="lg" className="font-medium" asChild><Link href="/verifikasi">Buat Laporan
-              <ArrowRight data-icon="inline-end" /></Link></Button>
-            <Button size="lg" variant="outline" className="font-medium" asChild><Link href="/login">Masuk sebagai Pegawai</Link></Button>
+            <Button size="lg" asChild>
+              <Link href="/verifikasi">
+                Buat Laporan
+                <ArrowRight data-icon="inline-end" />
+              </Link>
+            </Button>
+            <Button size="lg" variant="outline" asChild>
+              <Link href="/login">Masuk sebagai Petugas</Link>
+            </Button>
           </div>
         </section>
 
@@ -78,10 +92,10 @@ export default function LandingPage() {
           <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
             <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">Cara penanganan laporan</h2>
             <p className="mt-3 max-w-[62ch] text-[15px] leading-relaxed text-muted-foreground">
-              Empat tahap tetap, sama untuk semua kategori laporan. Posisi laporan dapat diikuti pada setiap tahapnya.
+              Prosedur penanganan terdiri dari enam tahap standar yang berlaku untuk seluruh kategori laporan. Status dan progress laporan dapat dipantau secara real-time di setiap tahapnya.
             </p>
 
-            <ol className="mt-12 grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
+            <ol className="mt-12 grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
               {STEPS.map((step) => (
                 <li key={step.title} className="border-t border-border pt-5">
                   <h3 className="text-base font-semibold">{step.title}</h3>
@@ -101,7 +115,7 @@ export default function LandingPage() {
                 pada salinan manual.
               </p>
             </div>
-            <Button className="shrink-0 font-medium" asChild><Link href="/laporan">Lihat laporan publik</Link></Button>
+            <Button className="shrink-0" asChild><Link href="/laporan">Lihat laporan publik</Link></Button>
           </div>
         </section> */}
       </main>
@@ -112,9 +126,6 @@ export default function LandingPage() {
           <nav className="flex flex-wrap gap-x-6 gap-y-2">
             <Link href="/verifikasi" className="transition-colors hover:text-foreground">
               Lapor Gangguan
-            </Link>
-            <Link href="/laporan" className="transition-colors hover:text-foreground">
-              Laporan Publik
             </Link>
             <Link href="/login" className="transition-colors hover:text-foreground">
               Masuk Pegawai

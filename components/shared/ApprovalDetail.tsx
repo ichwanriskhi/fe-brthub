@@ -1,39 +1,26 @@
 'use client';
 
-import { use, useEffect, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { getMyTicket, decideApproval } from '@/lib/api/tickets';
-import type { Ticket } from '@/lib/types/ticket';
+import { useState } from 'react';
 import { isDistributionClaim, HANDLER_ACTIONS } from '@/lib/constants/reviewer';
-import { StatusBadge, TypeBadge, PriorityBadge } from '@/components/shared/StatusBadge';
 import { TicketChatDrawer } from '@/components/shared/TicketChatDrawer';
+import { AttachmentList } from '@/components/shared/AttachmentList';
 import { TicketTimeline } from '@/components/shared/TicketTimeline';
+import { TicketHeader } from '@/components/shared/TicketHeader';
+import { TicketSummary } from '@/components/shared/TicketSummary';
+import { DetailList } from '@/components/shared/DetailList';
+import { ResolutionDecisionChip } from '@/components/shared/ResolutionDecisionChip';
 import { ClaimItemsTable } from '@/components/shared/ClaimItemsTable';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
-import { toast } from 'sonner';
+import { ResolutionHistoryDialog } from '@/components/shared/ResolutionHistoryDialog';
+import { useItemGroupName } from '@/hooks/use-item-groups';
+import { useApprovalTicket } from '@/components/shared/use-approval-ticket';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import {
-  ArrowLeft,
-  FileText,
-  Paperclip,
-  CheckCircle2,
-  XCircle,
-  Truck,
-  Sparkles,
-  User,
-  Building,
-  Loader2,
-  AlertCircle,
-  Info,
-  ShieldCheck,
-  ClipboardCheck,
-  History,
-  Send,
-} from 'lucide-react';
+import { Field, FieldLabel } from '@/components/ui/field';
+import { CheckCircle2, XCircle, AlertCircle, Info, History } from 'lucide-react';
 
 interface ApprovalDetailProps {
   /** Ticket id dari params halaman */
@@ -57,79 +44,29 @@ const APPROVAL_TYPE_LABEL: Record<string, string> = {
 };
 
 export function ApprovalDetail({ id, stage, backHref, readOnly = false }: ApprovalDetailProps) {
-  const router = useRouter();
-  const [ticket, setTicket] = useState<Ticket | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [chatOpen, setChatOpen] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [rejectionReason, setRejectionReason] = useState('');
-  const [showRejectForm, setShowRejectForm] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<'approve' | 'reject' | null>(null);
+  // Logika muat + putus dibagi dengan `FinalApprovalDetail` lewat hook —
+  // komponen ini hanya komposisi layout lengkap (INITIAL + arsip).
+  const {
+    ticket,
+    isLoading,
+    loadError,
+    isFinal,
+    chatOpen,
+    setChatOpen,
+    submitting,
+    rejectionReason,
+    setRejectionReason,
+    showRejectForm,
+    setShowRejectForm,
+    confirmAction,
+    setConfirmAction,
+    handleApprove,
+    handleReject,
+  } = useApprovalTicket({ id, stage, backHref });
 
-  useEffect(() => {
-    let cancelled = false;
-
-    getMyTicket(id)
-      .then((data) => {
-        if (cancelled) return;
-        setTicket(data);
-        setLoadError(null);
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        setLoadError(error instanceof Error ? error.message : 'Gagal memuat detail tiket.');
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
-
-  const isFinal = stage === 'FINAL';
-
-  const handleApprove = async () => {
-    if (!ticket) return;
-    setSubmitting(true);
-    try {
-      await decideApproval(id, { decision: 'APPROVE', stage });
-      toast.success(
-        isFinal
-          ? 'Penutupan tiket disetujui. Tiket telah selesai.'
-          : 'Tiket disetujui dan diteruskan ke unit untuk ditindak lanjuti.',
-      );
-      setTimeout(() => router.push(backHref), 1500);
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Gagal memproses persetujuan.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleReject = async () => {
-    if (!ticket) return;
-    if (!rejectionReason.trim()) {
-      toast.error('Alasan penolakan wajib diisi.');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await decideApproval(id, { decision: 'REJECT', stage, rejection_reason: rejectionReason.trim() });
-      toast.success(
-        isFinal
-          ? 'Resolusi ditolak — tiket dikembalikan ke handler untuk diperbaiki.'
-          : 'Tiket ditolak.',
-      );
-      setTimeout(() => router.push(backHref), 1500);
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Gagal memproses penolakan.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // productLine menyimpan KODE grup — tampilkan namanya, fallback kode mentah.
+  const productLineName = useItemGroupName(ticket?.productLine);
 
   if (isLoading || !ticket) {
     return (
@@ -145,177 +82,87 @@ export function ApprovalDetail({ id, stage, backHref, readOnly = false }: Approv
 
   const isClaim = isDistributionClaim(ticket.category);
   const isVehicleCategory = ticket.category === 'Produk & Kendaraan';
+  /**
+   * Handler sudah mengajukan resolusi (paling baru) — menentukan apakah
+   * stage FINAL punya sesuatu yang bisa disetujui/ditolak.
+   */
+  const hasSubmittedResolution = Boolean(
+    ticket.resolutionCycles && ticket.resolutionCycles.length > 0,
+  );
 
   return (
     <div className="space-y-6">
-      {/* Top Bar */}
-      <div className="flex items-center justify-between gap-4">
-        <Button variant="ghost" size="sm" asChild className="gap-2 text-muted-foreground hover:text-foreground">
-          <Link href={backHref}>
-            <ArrowLeft className="size-4" />
-            <span>Kembali</span>
-          </Link>
-        </Button>
+      {/* Header halaman — di luar Card supaya judul/badan/aksi tidak menumpuk */}
+      <TicketHeader
+        ticket={ticket}
+        backHref={backHref}
+        backLabel="Kembali"
+        actions={
+          // Tanpa `readOnly`: pesan approver dipaksa internal oleh backend
+          // (`resolveInternalFlag`) dan tidak pernah tampil ke pelapor.
+          <TicketChatDrawer ticketId={ticket.id} open={chatOpen} onOpenChange={setChatOpen} />
+        }
+      />
 
-        <TicketChatDrawer ticketId={ticket.id} open={chatOpen} onOpenChange={setChatOpen} readOnly />
-      </div>
+      <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* Kolom kiri (2/3): data tiket (read-only) */}
+        <div className="flex min-w-0 flex-col gap-6 lg:col-span-2">
+          <TicketSummary ticket={ticket} showWansis />
 
-      {/* Ticket Brief Header */}
-      <Card>
-        <CardContent className="space-y-4 pt-6">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0 space-y-1">
-              <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
-                <span className="font-semibold text-foreground">{ticket.id}</span>
-                <span>•</span>
-                <span>
-                  {new Date(ticket.createdAt).toLocaleDateString('id-ID', {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                  })}
-                </span>
-              </div>
-              <h1 className="text-xl font-bold tracking-tight md:text-2xl">{ticket.subject}</h1>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <TypeBadge ticketType={ticket.ticketType} />
-              <PriorityBadge priority={ticket.priority} />
-              <StatusBadge status={ticket.status} />
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-x-6 gap-y-3 border-t pt-4 text-xs text-muted-foreground">
-            <div className="flex items-center gap-1.5">
-              <User className="size-4 text-muted-foreground" />
-              <span>
-                Pelapor:{' '}
-                <strong className="font-semibold text-foreground">
-                  {ticket.reporterName} ({ticket.reporterPhone})
-                </strong>
-              </span>
-            </div>
-            {ticket.soNumber && (
-              <div className="flex items-center gap-1.5">
-                <FileText className="size-4 text-muted-foreground" />
-                <span>
-                  SO: <strong className="font-semibold text-foreground">{ticket.soNumber}</strong>
-                </span>
-              </div>
-            )}
-            {ticket.salesName && (
-              <div className="flex items-center gap-1.5">
-                <User className="size-4 text-muted-foreground" />
-                <span>
-                  Sales: <strong className="font-semibold text-foreground">{ticket.salesName}</strong>
-                </span>
-              </div>
-            )}
-            {ticket.productLine && (
-              <div className="flex items-center gap-1.5">
-                <Truck className="size-4 text-muted-foreground" />
-                <span>
-                  Lini Produk:{' '}
-                  <strong className="font-semibold text-foreground">{ticket.productLine}</strong>
-                </span>
-              </div>
-            )}
-            {ticket.vehicleModel && (
-              <div className="flex items-center gap-1.5">
-                <Sparkles className="size-4 text-muted-foreground" />
-                <span>
-                  Model Kendaraan:{' '}
-                  <strong className="font-semibold text-foreground">{ticket.vehicleModel}</strong>
-                </span>
-              </div>
-            )}
-            {ticket.customerData?.name && (
-              <div className="flex items-center gap-1.5">
-                <Building className="size-4 text-muted-foreground" />
-                <span>
-                  Customer:{' '}
-                  <strong className="font-semibold text-foreground">{ticket.customerData.name}</strong>
-                </span>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 gap-6 min-w-0 lg:grid-cols-3">
-        {/* Kolom kiri: data tiket (read-only) */}
-        <div className="min-w-0 space-y-6 lg:col-span-2">
           <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                <FileText className="size-4 text-muted-foreground" />
-                Data Laporan (Read-Only)
-              </CardTitle>
-              <CardDescription className="text-xs">
+            <CardHeader>
+              <CardTitle className="text-base">Data Laporan</CardTitle>
+              <CardDescription>
                 {isFinal
                   ? 'Data tiket & resolusi yang diajukan handler untuk persetujuan penutupan.'
                   : 'Data laporan sebagaimana diajukan pelapor dan diteruskan reviewer.'}
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <span className="mb-1 block text-xs font-semibold text-muted-foreground">Kategori</span>
-                  <span className="text-sm font-medium">{ticket.category}</span>
-                </div>
-                <div>
-                  <span className="mb-1 block text-xs font-semibold text-muted-foreground">Sub Kategori</span>
-                  <span className="text-sm font-medium">{ticket.subcategory || '-'}</span>
-                </div>
-              </div>
+            {/* `flex flex-col gap-6` — CardContent adalah display:block tanpa
+                gap, jadi tanpa ini tiap blok berdesain sendiri dan Separator
+                terlihat nempel ke konten. */}
+            <CardContent className="flex flex-col gap-6">
+              <DetailList
+                items={[
+                  { label: 'Kategori', value: ticket.category },
+                  { label: 'Sub Kategori', value: ticket.subcategory || '-' },
+                ]}
+              />
 
               <div>
-                <span className="mb-1 block text-xs font-semibold text-muted-foreground">Deskripsi</span>
-                <p className="whitespace-pre-wrap text-sm">{ticket.description}</p>
+                <p className="mb-2 text-xs text-muted-foreground">Deskripsi</p>
+                <p className="whitespace-pre-wrap text-sm text-foreground">{ticket.description}</p>
               </div>
 
               {isClaim && (ticket.soNumber || ticket.salesName) && (
                 <>
                   <Separator />
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div>
-                      <span className="mb-1 block text-xs font-semibold text-muted-foreground">No. SO</span>
-                      <span className="text-sm font-medium">{ticket.soNumber ?? '-'}</span>
-                    </div>
-                    <div>
-                      <span className="mb-1 block text-xs font-semibold text-muted-foreground">Nama Sales</span>
-                      <span className="text-sm font-medium">{ticket.salesName ?? '-'}</span>
-                    </div>
-                  </div>
+                  <DetailList
+                    items={[
+                      { label: 'Nomor SO', value: ticket.soNumber ?? '-' },
+                      { label: 'Nama Sales', value: ticket.salesName ?? '-' },
+                    ]}
+                  />
                 </>
               )}
 
               {isVehicleCategory && (ticket.productLine || ticket.vehicleModel) && (
                 <>
                   <Separator />
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div>
-                      <span className="mb-1 block text-xs font-semibold text-muted-foreground">Lini Produk</span>
-                      <span className="text-sm font-medium">{ticket.productLine ?? '-'}</span>
-                    </div>
-                    <div>
-                      <span className="mb-1 block text-xs font-semibold text-muted-foreground">
-                        Model Kendaraan
-                      </span>
-                      <span className="text-sm font-medium">{ticket.vehicleModel ?? '-'}</span>
-                    </div>
-                  </div>
+                  <DetailList
+                    items={[
+                      { label: 'Lini Produk', value: productLineName || ticket.productLine || '-' },
+                      { label: 'Model Kendaraan', value: ticket.vehicleModel ?? '-' },
+                    ]}
+                  />
                 </>
               )}
 
               {isClaim && ticket.claimedItems && ticket.claimedItems.length > 0 && (
                 <>
                   <Separator />
-                  <div>
-                    <div className="mb-2 flex items-center gap-2">
-                      <Truck className="size-4 text-primary" />
-                      <span className="text-xs font-semibold text-foreground">Informasi Barang Claim</span>
-                    </div>
+                  <div className="flex flex-col gap-2">
+                    <p className="text-xs text-muted-foreground">Informasi Barang Claim</p>
                     <ClaimItemsTable items={ticket.claimedItems} />
                   </div>
                 </>
@@ -328,15 +175,12 @@ export function ApprovalDetail({ id, stage, backHref, readOnly = false }: Approv
                 return (
                   <>
                     <Separator />
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <ClipboardCheck className="size-4 text-primary" />
-                        <span className="text-xs font-semibold text-foreground">
-                          Aksi yang Harus Dilakukan Handler
-                        </span>
-                      </div>
-                      <div className="rounded-lg border bg-muted/40 p-3">
-                        <div className="text-sm font-semibold text-foreground">{action.label}</div>
+                    <div className="flex flex-col gap-2">
+                      <p className="text-xs text-muted-foreground">
+                        Aksi yang Harus Dilakukan Handler
+                      </p>
+                      <div className="rounded-lg bg-muted/50 p-3">
+                        <p className="text-sm font-medium text-foreground">{action.label}</p>
                         <p className="mt-0.5 text-xs text-muted-foreground">{action.description}</p>
                       </div>
                     </div>
@@ -344,60 +188,48 @@ export function ApprovalDetail({ id, stage, backHref, readOnly = false }: Approv
                 );
               })()}
 
-              {/* Resolusi handler — khusus persetujuan penutupan */}
+              {/* Resolusi handler — khusus persetujuan penutupan.
+                  Label jujur terhadap status: yang tampil selalu versi aktif
+                  (no tertinggi) — "Diajukan" bila masih pending (antrean),
+                  "Final" bila sudah diputus (arsip). */}
               {isFinal && (
                 <>
                   <Separator />
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="size-4 text-emerald-600" />
-                      <span className="text-xs font-semibold text-foreground">
-                        Resolusi yang Diajukan Handler
-                      </span>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs text-muted-foreground">
+                        {readOnly ? 'Resolusi Final' : 'Resolusi yang Diajukan Handler'}
+                      </p>
+                      {(ticket.resolutionCycles?.length ?? 0) > 1 && (
+                        <Button variant="outline" size="sm" onClick={() => setHistoryOpen(true)}>
+                          <History data-icon="inline-start" />
+                          Lihat Riwayat
+                        </Button>
+                      )}
                     </div>
-                    <div className="rounded-lg border bg-muted/40 p-3 space-y-2">
+                    <div className="flex flex-col gap-4 rounded-lg bg-muted/50 p-4">
+                      <DetailList
+                        items={[{ label: 'Handler', value: ticket.handlerName ?? '-' }]}
+                        columns={1}
+                      />
                       <div>
-                        <span className="block text-xs font-semibold text-muted-foreground">Handler</span>
-                        <span className="text-sm font-medium">{ticket.handlerName ?? '-'}</span>
-                      </div>
-                      <div>
-                        <span className="block text-xs font-semibold text-muted-foreground">
-                          Ringkasan Resolusi
-                        </span>
-                        <p className="whitespace-pre-wrap text-sm">
+                        <p className="mb-1 text-xs text-muted-foreground">Ringkasan Resolusi</p>
+                        <p className="whitespace-pre-wrap text-sm text-foreground">
                           {ticket.resolutionSummary ?? 'Belum ada ringkasan resolusi.'}
                         </p>
                       </div>
                       {ticket.resolutionDetail && (
                         <div>
-                          <span className="block text-xs font-semibold text-muted-foreground">
-                            Detail Resolusi
-                          </span>
+                          <p className="mb-1 text-xs text-muted-foreground">Detail Resolusi</p>
                           <p className="whitespace-pre-wrap text-sm text-muted-foreground">
                             {ticket.resolutionDetail}
                           </p>
                         </div>
                       )}
                       {ticket.resolutionAttachments && ticket.resolutionAttachments.length > 0 && (
-                        <div>
-                          <span className="block text-xs font-semibold text-muted-foreground mb-2">
-                            Lampiran Resolusi
-                          </span>
-                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                            {ticket.resolutionAttachments.map((att) => (
-                              <a
-                                key={att.id}
-                                href={att.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="flex items-center gap-2 rounded-lg border bg-card p-2.5 transition-colors hover:bg-accent"
-                              >
-                                <Paperclip className="size-4 shrink-0 text-primary" />
-                                <span className="flex-1 truncate text-sm font-medium">{att.name}</span>
-                                <span className="text-[10px] text-muted-foreground">{att.size}</span>
-                              </a>
-                            ))}
-                          </div>
+                        <div className="flex flex-col gap-2">
+                          <p className="text-xs text-muted-foreground">Lampiran Resolusi</p>
+                          <AttachmentList items={ticket.resolutionAttachments} layout="grid" />
                         </div>
                       )}
                     </div>
@@ -409,55 +241,27 @@ export function ApprovalDetail({ id, stage, backHref, readOnly = false }: Approv
               {isFinal && ticket.handlerProgress && ticket.handlerProgress.length > 0 && (
                 <>
                   <Separator />
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2">
-                      <History className="size-4 text-muted-foreground" />
-                      <span className="text-xs font-semibold text-foreground">
-                        Progres Pengerjaan Handler
-                      </span>
-                    </div>
-                    <div className="relative space-y-4 pl-6">
-                      <div className="absolute bottom-1.5 left-[11px] top-1.5 w-px bg-border" />
+                  <div className="flex flex-col gap-3">
+                    <p className="text-xs text-muted-foreground">Progres Pengerjaan Handler</p>
+                    {/* Bentuk visual sama dengan TicketTimeline supaya dua
+                        daftar kronologi di halaman ini terbaca satu pola. */}
+                    <ol className="relative space-y-4 border-l pl-5">
                       {ticket.handlerProgress.map((p) => (
-                        <div key={p.id} className="relative">
-                          <div className="absolute -left-[18px] top-1.5 size-2.5 rounded-full border-2 border-primary bg-primary" />
-                          <div className="space-y-1.5 rounded-lg border bg-muted/20 p-3">
-                            <div className="flex flex-wrap items-center justify-between gap-1">
-                              <span className="text-xs font-semibold">{p.actorName ?? ticket.handlerName ?? 'Handler'}</span>
-                              <span className="text-[10px] text-muted-foreground">{p.timestamp}</span>
-                            </div>
-                            <p className="text-xs leading-relaxed text-foreground">{p.note}</p>
-                            {p.attachments?.length ? (
-                              <div className="flex flex-wrap gap-2 pt-1">
-                                {p.attachments.map((att) => (
-                                  <a
-                                    key={att.id}
-                                    href={att.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                  >
-                                    {att.type.startsWith('image/') ? (
-                                      <img
-                                        src={att.url}
-                                        alt={att.name}
-                                        className="size-7 rounded object-cover"
-                                      />
-                                    ) : (
-                                      <FileText className="size-3.5 shrink-0" />
-                                    )}
-                                    <span className="max-w-28 truncate">{att.name}</span>
-                                    <span className="shrink-0 text-[9px]">
-                                      {(Number(att.size) / 1024).toFixed(0)}KB
-                                    </span>
-                                  </a>
-                                ))}
-                              </div>
-                            ) : null}
+                        <li key={p.id} className="relative">
+                          <span className="absolute -left-[25px] top-1 size-2.5 rounded-full bg-primary ring-4 ring-card" />
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-sm font-medium text-foreground">
+                              {p.actorName ?? ticket.handlerName ?? 'Handler'}
+                            </p>
+                            <p className="text-xs text-muted-foreground">{p.timestamp}</p>
                           </div>
-                        </div>
+                          <p className="mt-0.5 text-sm leading-relaxed text-foreground">{p.note}</p>
+                          {p.attachments?.length ? (
+                            <AttachmentList items={p.attachments} size="xs" className="mt-2" />
+                          ) : null}
+                        </li>
                       ))}
-                    </div>
+                    </ol>
                   </div>
                 </>
               )}
@@ -465,39 +269,29 @@ export function ApprovalDetail({ id, stage, backHref, readOnly = false }: Approv
               {ticket.attachments && ticket.attachments.length > 0 && (
                 <>
                   <Separator />
-                  <div>
-                    <span className="mb-2 block text-xs font-semibold text-foreground">Lampiran Pelapor</span>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      {ticket.attachments.map((att) => (
-                        <a
-                          key={att.id}
-                          href={att.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-2 rounded-lg border bg-card p-2.5 transition-colors hover:bg-accent"
-                        >
-                          <Paperclip className="size-4 shrink-0 text-primary" />
-                          <span className="flex-1 truncate text-sm font-medium">{att.name}</span>
-                          <span className="text-[10px] text-muted-foreground">{att.size}</span>
-                        </a>
-                      ))}
-                    </div>
+                  <div className="flex flex-col gap-2">
+                    <p className="text-xs text-muted-foreground">Lampiran Pelapor</p>
+                    <AttachmentList items={ticket.attachments} layout="grid" />
                   </div>
                 </>
               )}
             </CardContent>
           </Card>
+
+          <TicketTimeline activities={ticket.activities} />
         </div>
 
-        {/* Kolom kanan: aksi approver */}
-        <div className="min-w-0 space-y-6">
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                <ShieldCheck className="size-4 text-primary" />
-                {isFinal ? 'Persetujuan Penutupan' : 'Persetujuan Tiket'}
-              </CardTitle>
-              <CardDescription className="text-xs">
+        {/* Kolom kanan (1/3) KHUSUS aksi yang jadi tujuan user membuka halaman
+          ini — sticky di lg+ supaya approve/reject tetap terjangkau saat
+          kolom kiri panjang. */}
+        <div className="flex min-w-0 flex-col gap-6">
+          <div className="lg:sticky lg:top-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">
+                  {isFinal ? 'Persetujuan Penutupan' : 'Persetujuan Tiket'}
+                </CardTitle>
+              <CardDescription>
                 {readOnly
                   ? 'Detail keputusan yang pernah Anda buat untuk tiket ini.'
                   : isFinal
@@ -505,131 +299,138 @@ export function ApprovalDetail({ id, stage, backHref, readOnly = false }: Approv
                     : 'Setujui tiket untuk diteruskan ke unit teknis, atau tolak pengajuannya.'}
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2 rounded-lg border bg-muted/40 p-3 text-xs">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Ringkasan Persetujuan
-                </div>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <div>
-                    <span className="block text-muted-foreground">Tujuan Eskalasi</span>
-                    <span className="font-semibold">
-                      {ticket.approvalTarget
-                        ? APPROVAL_TYPE_LABEL[ticket.approvalTarget] ?? ticket.approvalTarget
-                        : '-'}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="block text-muted-foreground">Unit Tujuan</span>
-                    <span className="font-semibold">
-                      {ticket.destinationDepartmentName || ticket.assignedUnit || '-'}
-                    </span>
-                  </div>
-                  <div className="col-span-2">
-                    <span className="block text-muted-foreground">Prioritas</span>
-                    <span className="font-semibold">{ticket.priority ?? 'Belum ditentukan'}</span>
-                  </div>
-                </div>
-              </div>
+            <CardContent className="flex flex-col gap-6">
+              <DetailList
+                items={[
+                  {
+                    label: 'Tujuan Eskalasi',
+                    value: ticket.approvalTarget
+                      ? (APPROVAL_TYPE_LABEL[ticket.approvalTarget] ?? ticket.approvalTarget)
+                      : '-',
+                  },
+                  {
+                    label: 'Unit Tujuan',
+                    value: ticket.destinationDepartmentName || ticket.assignedUnit || '-',
+                  },
+                  { label: 'Prioritas', value: ticket.priority ?? 'Belum ditentukan' },
+                ]}
+              />
 
               {showRejectForm && (
-                <div className="space-y-2">
-                  <label className="block text-xs font-semibold text-foreground">
-                    Alasan Penolakan <span className="text-red-500">*</span>
-                  </label>
+                <Field>
+                  <FieldLabel>Alasan Penolakan</FieldLabel>
                   <Textarea
                     value={rejectionReason}
                     onChange={(e) => setRejectionReason(e.target.value)}
                     placeholder={
                       isFinal
-                        ? 'Jelaskan mengapa resolusi handler ditolak — tiket akan dikembalikan ke handler.'
+                        ? 'Jelaskan mengapa resolusi handler ditolak, tiket akan dikembalikan ke handler.'
                         : 'Jelaskan mengapa tiket ini ditolak.'
                     }
                     className="min-h-24"
                     disabled={submitting}
                   />
-                </div>
+                </Field>
               )}
 
               {readOnly ? (
-                /* ── Mode riwayat: tidak ada aksi, hanya ringkasan keputusan ── */
-                <div className="space-y-2 rounded-lg border bg-muted/40 p-3 text-xs">
-                  <div className="flex items-center gap-2">
-                    {ticket.rejectionReason ? (
-                      <XCircle className="size-4 text-destructive" />
-                    ) : (
-                      <CheckCircle2 className="size-4 text-emerald-600" />
-                    )}
-                    <span className="font-semibold text-foreground">
-                      {ticket.rejectionReason ? 'Tiket Ditolak' : 'Tiket Disetujui'}
-                    </span>
-                  </div>
+                /* ── Mode riwayat: tidak ada aksi, hanya ringkasan keputusan ──
+                   Keputusan = chip (satu item), alasan = teks. Bukan blok
+                   berwarna, karena warna blok di aplikasi ini berarti "state
+                   tiket", bukan "keputusan atas satu pengajuan". */
+                <div className="flex flex-col gap-3 rounded-lg bg-muted/50 p-4">
+                  <ResolutionDecisionChip
+                    decision={ticket.rejectionReason ? 'REJECTED' : 'APPROVED'}
+                  />
                   {ticket.rejectionReason && (
-                    <p className="leading-relaxed text-muted-foreground">{ticket.rejectionReason}</p>
+                    <p className="text-sm leading-relaxed text-foreground">
+                      {ticket.rejectionReason}
+                    </p>
                   )}
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     Tiket ini sudah pernah Anda proses. Lihat detail data tiket di kolom kiri.
                   </p>
                 </div>
               ) : showRejectForm ? (
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-2">
                   <Button
                     onClick={() => setConfirmAction('reject')}
                     disabled={submitting}
                     variant="destructive"
-                    className="flex-1 gap-2 text-xs font-semibold"
+                    className="w-full"
                   >
-                    {submitting ? <Loader2 className="size-4 animate-spin" /> : <XCircle className="size-4" />}
-                    <span>Konfirmasi Tolak</span>
+                    {submitting ? (
+                      <Spinner data-icon="inline-start" />
+                    ) : (
+                      <XCircle data-icon="inline-start" />
+                    )}
+                    Konfirmasi Tolak
                   </Button>
                   <Button
+                    variant="outline"
+                    className="w-full"
                     onClick={() => {
                       setShowRejectForm(false);
                       setRejectionReason('');
                     }}
                     disabled={submitting}
-                    variant="outline"
-                    className="text-xs font-semibold"
                   >
                     Batal
                   </Button>
                 </div>
               ) : (
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-2">
                   <Button
+                    className="w-full"
                     onClick={() => setConfirmAction('approve')}
                     disabled={submitting}
-                    className="flex-1 gap-2 text-xs font-semibold"
                   >
-                    {submitting ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
-                    <span>{isFinal ? 'Setujui Penutupan' : 'Setujui Tiket'}</span>
+                    {submitting ? (
+                      <Spinner data-icon="inline-start" />
+                    ) : (
+                      <CheckCircle2 data-icon="inline-start" />
+                    )}
+                    {isFinal ? 'Setujui Penutupan' : 'Setujui Tiket'}
                   </Button>
                   <Button
+                    className="w-full"
                     onClick={() => setShowRejectForm(true)}
                     disabled={submitting}
                     variant="destructive"
-                    className="gap-2 text-xs font-semibold"
                   >
-                    <XCircle className="size-4" />
-                    <span>Tolak</span>
+                    <XCircle data-icon="inline-start" />
+                    Tolak
                   </Button>
                 </div>
               )}
 
-              <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-                <Info className="mt-0.5 size-4 shrink-0" />
-                <span>
-                  {isFinal
-                    ? 'Menolak penutupan berarti resolusi handler ditolak & tiket dikembalikan ke handler sebagai permintaan perbaikan.'
-                    : 'Penolakan tiket memerlukan alasan yang akan diteruskan ke pelapor dan reviewer.'}
-                </span>
-              </div>
+              {/* Catatan konsekuensi penolakan — hanya relevan selama keputusan
+                  masih bisa dibuat. Di arsip (readOnly) tiket sudah CLOSED
+                  dan tidak ada yang bisa ditolak lagi, jadi kalimatnya bohong.
+                  Untuk stage FINAL aktif, tetap perlu resolusi yang diajukan. */}
+              {!readOnly && (!isFinal || hasSubmittedResolution) && (
+                <div className="flex items-start gap-2 rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
+                  <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
+                  <span>
+                    {isFinal
+                      ? 'Menolak penutupan berarti resolusi handler ditolak & tiket dikembalikan ke handler sebagai permintaan perbaikan.'
+                      : 'Penolakan tiket memerlukan alasan yang akan diteruskan ke pelapor dan reviewer.'}
+                  </span>
+                </div>
+              )}
             </CardContent>
           </Card>
+          </div>
         </div>
       </div>
 
-      <TicketTimeline activities={ticket.activities} />
+      {/* Riwayat perbaikan resolusi — versi-versi sebelumnya + status review
+          dan catatan approver per versi. */}
+      <ResolutionHistoryDialog
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        cycles={ticket.resolutionCycles ?? []}
+      />
 
       {/* Konfirmasi sebelum aksi penting (APPROVE / REJECT) */}
       <ConfirmDialog

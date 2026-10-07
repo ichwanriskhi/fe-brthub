@@ -1,9 +1,11 @@
+import { authenticatedFetch } from './fetch-wrapper';
+
 /**
- * Detail Sales Order dari SAP monitor (`/api/sap/order/detail?soNumber=...`).
+ * Detail Sales Order dari SAP (`/api/auth/sap/order/detail?soNumber=...`).
  *
- * Dipanggil lewat rewrite Next.js (`/api/sap/*`) — request server-to-server,
- * jadi CORS SAP tidak berlaku dan IP internal tidak ter-expose di browser,
- * sama dengan pengambilan monitor list di SoCombobox.
+ * Dipanggil lewat BE Laravel — server-to-server dari BE ke SAP,
+ * sehingga IP internal SAP tidak ter-expose di browser dan response
+ * di-cache 10 menit di sisi server.
  */
 
 export interface SapOrderItem {
@@ -11,6 +13,10 @@ export interface SapOrderItem {
   code: string;
   /** Nama barang (field ItemName / itemName / Item Description). */
   name: string;
+  /** Kode grup WANSIS (ItmsGrpCod) — ada bila upstream mengirimnya. */
+  groupCode?: string;
+  /** Nama grup WANSIS (ItmsGrpNam). */
+  groupName?: string;
 }
 
 export interface SapMasterItem {
@@ -18,6 +24,10 @@ export interface SapMasterItem {
   code: string;
   /** Nama barang dari Master Item SAP. */
   name: string;
+  /** Kode grup WANSIS — ada bila upstream mengirimnya. */
+  groupCode?: string;
+  /** Nama grup WANSIS. */
+  groupName?: string;
 }
 
 export interface SapMasterItemsResponse {
@@ -37,7 +47,10 @@ export interface SapMasterItemsResponse {
   error?: string;
 }
 
-const SAP_DETAIL_URL = '/api/sap/order/detail';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+
+/** Endpoint BE untuk detail SO — server memanggil SAP secara internal. */
+const SAP_ORDER_DETAIL_URL = `${API_BASE}/api/auth/sap/order/detail`;
 const SAP_ITEMS_URL = '/api/auth/sap/items';
 
 interface CacheEntry {
@@ -53,6 +66,63 @@ let inflight: Promise<SapOrderItem[]> | null = null;
 /** Apakah objek punya tipe record yang bisa diakses propertinya. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Grup barang WANSIS (ItmsGrpCod/ItmsGrpNam) — master tunggal lini produk.
+ * Kode numerik upstream disimpan sebagai string apa adanya.
+ */
+export interface SapItemGroup {
+  code: string | null;
+  name: string;
+}
+
+let groupsCache: SapItemGroup[] | null = null;
+let groupsInflight: Promise<SapItemGroup[]> | null = null;
+
+/**
+ * Daftar grup untuk dropdown Lini Produk & mapping kode→nama.
+ * Cache modul: daftar 31 grup jarang berubah; gagal muat → [] (dropdown
+ * kosong, bukan hardcode — prinsip yang sama seperti useMasterOptions).
+ */
+export async function getItemGroups(): Promise<SapItemGroup[]> {
+  if (groupsCache) return groupsCache;
+  if (groupsInflight) return groupsInflight;
+
+  groupsInflight = (async () => {
+    try {
+      // Lewat wrapper: 401 memicu refresh + retry. Gagal total → [] (dropdown
+      // kosong, bukan hardcode) — perilaku fallback dipertahankan.
+      const res = await authenticatedFetch(`${API_BASE}/api/auth/sap/item-groups`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) return [];
+      const json = await res.json().catch(() => null);
+      const payload = isRecord(json) && json.success ? json.data : json;
+      const list = Array.isArray(payload) ? payload : [];
+      const groups = list
+        .filter(isRecord)
+        .map((g) => ({
+          code: g.code === null || g.code === undefined || g.code === '' ? null : String(g.code),
+          name: String(g.name ?? ''),
+        }))
+        .filter((g) => g.name !== '');
+      groupsCache = groups;
+      return groups;
+    } catch {
+      return [];
+    } finally {
+      groupsInflight = null;
+    }
+  })();
+
+  return groupsInflight;
+}
+
+/** Cari nama grup dari kodenya; fallback kode mentah bila tak dikenal. */
+export function itemGroupName(groups: SapItemGroup[], code: string | null | undefined): string {
+  if (!code) return '';
+  return groups.find((g) => g.code === code)?.name ?? code;
 }
 
 /**
@@ -77,17 +147,28 @@ function parseLines(lines: unknown): SapOrderItem[] {
       raw.ItemName ?? raw.itemName ?? raw['Item Description'] ?? '',
     ).trim();
 
+    // Grup WANSIS bila upstream mengirimnya (ItmsGrpCod/ItmsGrpNam).
+    const groupCodeRaw = raw.ItmsGrpCod ?? raw.itmsGrpCod ?? raw.itemGroupCode ?? null;
+    const groupNameRaw = raw.ItmsGrpNam ?? raw.itmsGrpNam ?? raw.itemGroupName ?? null;
+
     seen.add(code);
-    items.push({ code, name });
+    items.push({
+      code,
+      name,
+      ...(groupCodeRaw !== null && groupCodeRaw !== undefined && String(groupCodeRaw) !== ''
+        ? { groupCode: String(groupCodeRaw) }
+        : {}),
+      ...(groupNameRaw ? { groupName: String(groupNameRaw) } : {}),
+    });
   }
 
   return items;
 }
 
 /**
- * Ambil item barang untuk sebuah nomor SO.
+ * Ambil item barang untuk sebuah nomor SO melalui BE (server-to-server ke SAP).
  *
- * Mengembalikan array kosong bila SO tidak ditemukan atau SAP error —
+ * Mengembalikan array kosong bila SO tidak ditemukan atau error —
  * pemanggil tetap bisa men-submit klaim tanpa dropdown, tidak terblokir.
  */
 export async function fetchSapOrderItems(soNumber: string): Promise<SapOrderItem[]> {
@@ -99,12 +180,20 @@ export async function fetchSapOrderItems(soNumber: string): Promise<SapOrderItem
   if (inflight) return inflight;
 
   inflight = (async () => {
-    const url = `${SAP_DETAIL_URL}?soNumber=${encodeURIComponent(key)}`;
-    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    const url = `${SAP_ORDER_DETAIL_URL}?soNumber=${encodeURIComponent(key)}`;
+
+    // Lewat wrapper: 401 memicu refresh + retry. Throw dipertahankan agar
+    // pemanggil (loadSapOrderItems → onError) tetap menerima errornya.
+    const res = await authenticatedFetch(url, {
+      headers: { Accept: 'application/json' },
+    });
+
     if (!res.ok) throw new Error(`SAP API error: ${res.status}`);
 
     const json = await res.json().catch(() => null);
-    const lines = isRecord(json) ? json.lines : [];
+    // BE membungkus response dalam { success, data }; data berisi payload SAP asli
+    const payload = isRecord(json) && json.success ? json.data : json;
+    const lines = isRecord(payload) ? payload.lines : [];
 
     const items = parseLines(lines);
     cache.set(key, { items, done: true });
@@ -159,11 +248,10 @@ export async function searchSapMasterItems(
   const url = `${API_URL}${SAP_ITEMS_URL}?q=${encodeURIComponent(query)}&page=${page}`;
 
   try {
-    const res = await fetch(url, {
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('brthub_token') || localStorage.getItem('auth_token')}`,
-      },
+    // Lewat wrapper: 401 memicu refresh + retry. Error lain tetap dilempar
+    // agar dropdown menampilkan pesannya (kontrak error dipertahankan).
+    const res = await authenticatedFetch(url, {
+      headers: { Accept: 'application/json' },
     });
 
     if (!res.ok) {
@@ -182,9 +270,15 @@ export async function searchSapMasterItems(
         items: items.map((item: unknown) => {
           if (!isRecord(item)) return { code: '', name: '' };
           // SAP API uses ItemCode and ItemName (case-sensitive)
+          const groupCodeRaw = item.ItmsGrpCod ?? item.itemGroupCode ?? null;
+          const groupNameRaw = item.ItmsGrpNam ?? item.itemGroupName ?? null;
           return {
             code: String(item.ItemCode || item.code || item.itemCode || '').trim(),
             name: String(item.ItemName || item.name || item.itemName || '').trim(),
+            ...(groupCodeRaw !== null && groupCodeRaw !== undefined && String(groupCodeRaw) !== ''
+              ? { groupCode: String(groupCodeRaw) }
+              : {}),
+            ...(groupNameRaw ? { groupName: String(groupNameRaw) } : {}),
           };
         }),
         page: Number(json.data.page) || page,
@@ -202,9 +296,15 @@ export async function searchSapMasterItems(
       return {
         items: json.map((item: unknown) => {
           if (!isRecord(item)) return { code: '', name: '' };
+          const groupCodeRaw = item.ItmsGrpCod ?? item.itemGroupCode ?? null;
+          const groupNameRaw = item.ItmsGrpNam ?? item.itemGroupName ?? null;
           return {
             code: String(item.ItemCode || item.code || item.itemCode || '').trim(),
             name: String(item.ItemName || item.name || item.itemName || '').trim(),
+            ...(groupCodeRaw !== null && groupCodeRaw !== undefined && String(groupCodeRaw) !== ''
+              ? { groupCode: String(groupCodeRaw) }
+              : {}),
+            ...(groupNameRaw ? { groupName: String(groupNameRaw) } : {}),
           };
         }),
         page,

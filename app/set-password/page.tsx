@@ -4,6 +4,7 @@ import { Suspense, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
@@ -99,14 +100,16 @@ function SetPasswordForm() {
                       if (!touched) setTouched(true);
                     }}
                   />
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="icon-sm"
                     onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     aria-label={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}
                   >
-                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </button>
+                    {showPassword ? <EyeOff /> : <Eye />}
+                  </Button>
                 </div>
               </Field>
 
@@ -122,14 +125,16 @@ function SetPasswordForm() {
                     value={confirmation}
                     onChange={(e) => setConfirmation(e.target.value)}
                   />
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="icon-sm"
                     onClick={() => setShowConfirmation((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     aria-label={showConfirmation ? 'Sembunyikan konfirmasi' : 'Tampilkan konfirmasi'}
                   >
-                    {showConfirmation ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </button>
+                    {showConfirmation ? <EyeOff /> : <Eye />}
+                  </Button>
                 </div>
                 {confirmation !== '' && !passwordsMatch && (
                   <p className="text-xs text-destructive">Konfirmasi password tidak sama.</p>
@@ -160,6 +165,7 @@ function SetPasswordForm() {
 
               <Field>
                 <Button type="submit" className="w-full" disabled={!canSubmit}>
+                  {isLoading && <Spinner data-icon="inline-start" />}
                   {isLoading ? 'Menyimpan...' : 'Simpan Password'}
                 </Button>
               </Field>

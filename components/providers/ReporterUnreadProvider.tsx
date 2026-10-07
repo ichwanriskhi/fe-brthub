@@ -22,7 +22,7 @@ const ReporterUnreadContext = createContext<ReporterUnreadValue | null>(null);
  * Menyimpan jumlah pesan belum dibaca percakapan reporter per tiket.
  * Persist ke localStorage agar bertahan antar kunjungan halaman.
  * Angka akan terisi nyata begitu API chat tersedia; untuk sekarang state
- * dimulai dari 0 (menggantikan MOCK_UNREAD).
+ * dimulai dari 0.
  */
 export function ReporterUnreadProvider({ children }: { children: React.ReactNode }) {
   const [unread, setUnread] = useState<Record<string, number>>({});

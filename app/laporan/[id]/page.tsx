@@ -1,35 +1,24 @@
 'use client';
 
 import { use, useEffect, useState } from 'react';
-import Link from 'next/link';
 import { getMyTicket } from '@/lib/api/tickets';
 import type { Ticket } from '@/lib/types/ticket';
-import { StatusBadge } from '@/components/shared/StatusBadge';
 import { ClaimItemsTable } from '@/components/shared/ClaimItemsTable';
 import { TicketChatDrawer } from '@/components/shared/TicketChatDrawer';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
+import { AttachmentList } from '@/components/shared/AttachmentList';
+import { TicketHeader } from '@/components/shared/TicketHeader';
+import { TicketSummary } from '@/components/shared/TicketSummary';
+import { TicketTimeline } from '@/components/shared/TicketTimeline';
+import { DetailList } from '@/components/shared/DetailList';
 import {
-  ArrowLeft,
-  Building,
-  ClipboardCheck,
-  FileText,
-  Paperclip,
-  CheckCircle2,
-  AlertCircle,
-  MessageSquare,
-  User,
-  Phone,
-  MapPin,
-  FileOutput,
-  RefreshCwIcon,
-  Clock,
-  Hammer,
-  ChevronDown,
-  ChevronUp,
-} from 'lucide-react';
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { ChevronDown, ChevronUp, CheckCircle2, AlertCircle, FileOutput } from 'lucide-react';
 
 const STAGES = [
   { key: 'OPEN', label: 'Dibuat', desc: 'Laporan berhasil dibuat & dikirim' },
@@ -98,141 +87,99 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
   const isRejected = ticket.status === 'REJECTED';
   const isClosed = ticket.status === 'CLOSED';
 
-  // Ambil resolusi terakhir yang sudah disetujui (APPROVED) untuk ditampilkan ke reporter
-  const approvedResolutions = (ticket.resolutions ?? []).filter((r) => r.reviewDecision === 'APPROVED');
-  const latestApprovedResolution = approvedResolutions.length > 0
-    ? approvedResolutions[approvedResolutions.length - 1]
-    : null;
-  const hasResolution = isClosed && latestApprovedResolution !== null;
+  // Resolusi approved untuk reporter: saat CLOSED, siklus aktif (no tertinggi)
+  // adalah versi yang disetujui approver. Dibaca dari field ringkas
+  // `resolutionSummary/Detail/Attachments` — BUKAN `ticket.resolutions` yang
+  // tidak pernah diisi `toReporterTicket` (dead code: selalu undefined).
+  // Tanpa riwayat revisi dan tanpa chip status: reporter melihat hasil,
+  // bukan prosesnya.
+  const hasResolution = isClosed && !!ticket.resolutionSummary;
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-5xl space-y-6">
-      {/* ── Top Action Bar ── */}
-      <div className="flex items-center justify-between gap-4">
-        <Button variant="ghost" size="sm" asChild className="gap-2 text-muted-foreground hover:text-foreground">
-          <Link href="/laporan">
-            <ArrowLeft className="size-4" />
-            <span>Kembali</span>
-          </Link>
-        </Button>
+      {/* Header halaman — di luar Card. Aksi (Surat Keluar + chat) tetap di
+        header; shell reporter memakai max-w-5xl sendiri, bukan AppLayout. */}
+      <TicketHeader
+        ticket={ticket}
+        backHref="/laporan"
+        backLabel="Kembali"
+        actions={
+          <>
+            {isClosed && (
+              <Button variant="outline" size="sm">
+                <FileOutput data-icon="inline-start" />
+                <span className="hidden sm:inline">Surat Keluar</span>
+                <span className="sm:hidden">Surat</span>
+              </Button>
+            )}
+            <TicketChatDrawer ticketId={ticket.id} open={chatOpen} onOpenChange={setChatOpen} />
+          </>
+        }
+      />
 
-        <div className="flex items-center gap-2">
-          {/* Surat Keluar — hanya muncul saat CLOSED */}
-          {isClosed && (
-            <Button variant="outline" size="sm" className="gap-2 font-medium">
-              <FileOutput className="size-4" />
-              <span className="hidden sm:inline">Surat Keluar</span>
-              <span className="sm:hidden">Surat</span>
-            </Button>
-          )}
+      <TicketSummary ticket={ticket} />
 
-          <TicketChatDrawer ticketId={ticket.id} open={chatOpen} onOpenChange={setChatOpen} />
-        </div>
-      </div>
-
-      {/* ── Header Info ── */}
+      {/* ── Status Stepper ── */}
       <Card>
-        <CardContent className="space-y-4 pt-6">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0 space-y-1">
-              <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
-                <span className="font-semibold text-foreground">{ticket.id}</span>
-                <span>•</span>
-                <span>{new Date(ticket.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
-              </div>
-              <h1 className="text-xl font-bold tracking-tight md:text-2xl">{ticket.subject}</h1>
-            </div>
-            <div className="flex items-center gap-2">
-              <StatusBadge status={ticket.status} />
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-x-6 gap-y-3 border-t pt-4 text-xs text-muted-foreground">
-            {ticket.isReportForCustomer && ticket.customerData?.name && (
-              <div className="flex items-center gap-1.5">
-                <Building className="size-4 text-muted-foreground" />
-                <span>Pelanggan: <strong className="font-semibold text-foreground">{ticket.customerData.name}</strong></span>
-              </div>
-            )}
-            {ticket.category === 'Klaim Distribusi & Pengiriman' && ticket.soNumber && (
-              <div className="flex items-center gap-1.5">
-                <FileText className="size-4 text-muted-foreground" />
-                <span>SO: <strong className="font-semibold text-foreground">{ticket.soNumber}</strong></span>
-              </div>
-            )}
-            {ticket.category === 'Klaim Distribusi & Pengiriman' && ticket.salesName && (
-              <div className="flex items-center gap-1.5">
-                <User className="size-4 text-muted-foreground" />
-                <span>Sales: <strong className="font-semibold text-foreground">{ticket.salesName}</strong></span>
-              </div>
-            )}
-            <div className="flex items-center gap-1.5">
-              <User className="size-4 text-muted-foreground" />
-              <span>Pelapor: <strong className="font-semibold text-foreground">{ticket.reporterName}</strong></span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ── Status Stepper Timeline ── */}
-      <Card>
-        <CardHeader className="border-b">
-          <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-            <ClipboardCheck className="size-4 text-muted-foreground" />
-            Progres Penanganan Tiket
-          </CardTitle>
+        <CardHeader>
+          <CardTitle className="text-base">Progres Penanganan</CardTitle>
+          <CardDescription>Tahap penanganan laporan yang sedang berjalan.</CardDescription>
         </CardHeader>
         <CardContent>
           {isRejected ? (
-            <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-red-800 flex items-start gap-3">
-              <AlertCircle className="size-5 shrink-0 text-red-600 mt-0.5" />
+            <div className="flex items-start gap-3 rounded-lg bg-destructive/10 p-4">
+              <AlertCircle aria-hidden className="mt-0.5 size-5 shrink-0 text-destructive" />
               <div>
-                <p className="font-semibold text-sm">Laporan Ditolak</p>
-                <p className="text-xs text-red-700 mt-0.5">
-                  Laporan tidak memenuhi kriteria verifikasi atau informasi tidak sesuai. Silakan periksa pesan dari tim reviewer di tombol diskusi.
+                <p className="text-sm font-medium text-destructive">Laporan Ditolak</p>
+                <p className="mt-0.5 text-sm text-foreground">
+                  Laporan tidak memenuhi kriteria verifikasi atau informasi tidak sesuai.
+                  Silakan periksa pesan dari tim reviewer di tombol diskusi.
                 </p>
               </div>
             </div>
           ) : (
-            <div className="py-2">
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                {STAGES.map((stage, idx) => {
-                  const isDone = idx < currentStageIndex;
-                  const isCurrent = idx === currentStageIndex;
-                  return (
-                    <div key={stage.key} className="flex flex-col gap-2 p-3 rounded-lg border bg-muted/20">
-                      <div className="flex items-center gap-2">
-                        <div
-                          className={`size-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                            isDone
-                              ? 'bg-emerald-600 text-white'
-                              : isCurrent
-                              ? 'bg-primary text-primary-foreground ring-2 ring-primary/20'
+            <ol className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+              {STAGES.map((stage, idx) => {
+                const isDone = idx < currentStageIndex;
+                const isCurrent = idx === currentStageIndex;
+                return (
+                  <li
+                    key={stage.key}
+                    className={`flex flex-col gap-2 rounded-lg border p-3 ${
+                      isCurrent ? 'border-primary bg-primary/5' : 'bg-muted/30'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-medium ${
+                          isDone
+                            ? 'bg-emerald-500 text-white'
+                            : isCurrent
+                              ? 'bg-primary text-primary-foreground'
                               : 'bg-muted text-muted-foreground'
-                          }`}
-                        >
-                          {isDone ? <CheckCircle2 className="size-3.5" /> : idx + 1}
-                        </div>
-                        <span
-                          className={`text-xs font-semibold ${
-                            isCurrent
-                              ? 'text-primary'
-                              : isDone
-                              ? 'text-emerald-700'
+                        }`}
+                      >
+                        {isDone ? <CheckCircle2 className="size-3.5" /> : idx + 1}
+                      </span>
+                      <span
+                        className={`text-sm font-medium ${
+                          isCurrent
+                            ? 'text-primary'
+                            : isDone
+                              ? 'text-foreground'
                               : 'text-muted-foreground'
-                          }`}
-                        >
-                          {stage.label}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        {stage.desc}
-                      </p>
+                        }`}
+                      >
+                        {stage.label}
+                      </span>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {stage.desc}
+                    </p>
+                  </li>
+                );
+              })}
+            </ol>
           )}
         </CardContent>
       </Card>
@@ -240,67 +187,54 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
       {/* ── Progres Pengerjaan Handler (timeline) ── */}
       {ticket.handlerProgress && ticket.handlerProgress.length > 0 && (
         <Card>
-          <CardHeader className="border-b">
-            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-              <Hammer className="size-4 text-muted-foreground" />
-              Progres Pengerjaan Handler
-            </CardTitle>
+          <CardHeader>
+            <CardTitle className="text-base">Progres Pengerjaan Handler</CardTitle>
+            <CardDescription>Update berkala selama penanganan berlangsung.</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="relative space-y-4 pl-6">
-              {/* Vertical line */}
-              <div className="absolute left-[11px] top-1.5 bottom-1.5 w-px bg-border" />
+          <CardContent className="flex flex-col gap-6">
+            {/* Bentuk visual sama dengan TicketTimeline supaya daftar
+                kronologi di halaman ini terbaca satu pola. */}
+            <ol className="relative space-y-4 border-l pl-5">
               {(showAllProgress
                 ? ticket.handlerProgress
                 : ticket.handlerProgress.slice(0, PROGRESS_SHOW_LIMIT)
               ).map((p) => (
-                <div key={p.id} className="relative">
-                  {/* Dot */}
-                  <div className="absolute left-[-18px] top-1.5 size-2.5 rounded-full border-2 border-primary bg-primary" />
-                  <div className="space-y-1.5 rounded-lg border bg-muted/20 p-3.5">
-                    <div className="flex flex-wrap items-center justify-between gap-1">
-                      <span className="text-xs font-bold text-foreground">
-                        {ticket.handlerName ?? 'Handler'}
-                      </span>
-                      <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                        <Clock className="size-3" />
-                        {p.timestamp}
-                      </span>
-                    </div>
-                    <p className="text-xs text-foreground leading-relaxed">{p.note}</p>
-                    {p.attachments && p.attachments.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 pt-1">
-                        {p.attachments.map((att) => (
-                          <a
-                            key={att.id}
-                            href={att.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-[10px] hover:bg-accent transition-colors"
-                          >
-                            <Paperclip className="size-3 text-primary" />
-                            {att.name}
-                            <span className="text-muted-foreground">{att.size}</span>
-                          </a>
-                        ))}
-                      </div>
-                    )}
+                <li key={p.id} className="relative">
+                  <span className="absolute -left-[25px] top-1 size-2.5 rounded-full bg-primary ring-4 ring-card" />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-foreground">
+                      {p.actorName ?? ticket.handlerName ?? 'Handler'}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{p.timestamp}</p>
                   </div>
-                </div>
+                  <p className="mt-0.5 text-sm leading-relaxed text-foreground">{p.note}</p>
+                  {p.attachments && p.attachments.length > 0 && (
+                    <AttachmentList items={p.attachments} size="xs" className="mt-2" />
+                  )}
+                </li>
               ))}
-            </div>
-            {/* ── Show More button ── */}
+            </ol>
+
             {ticket.handlerProgress.length > PROGRESS_SHOW_LIMIT && (
-              <button
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
                 onClick={() => setShowAllProgress((v) => !v)}
-                className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed py-2 text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground transition-colors"
+                className="mt-4 w-full border-dashed text-muted-foreground"
               >
                 {showAllProgress ? (
-                  <><ChevronUp className="size-3.5" /> Sembunyikan</>
+                  <>
+                    <ChevronUp data-icon="inline-start" />
+                    Sembunyikan
+                  </>
                 ) : (
-                  <><ChevronDown className="size-3.5" /> Tampilkan {ticket.handlerProgress.length - PROGRESS_SHOW_LIMIT} progres lainnya</>
+                  <>
+                    <ChevronDown data-icon="inline-start" />
+                    Tampilkan {ticket.handlerProgress.length - PROGRESS_SHOW_LIMIT} progres lainnya
+                  </>
                 )}
-              </button>
+              </Button>
             )}
           </CardContent>
         </Card>
@@ -311,190 +245,92 @@ export default function TicketDetailPage({ params }: { params: Promise<{ id: str
       {/* ════════════════════════════════════════ */}
       {hasResolution && (
         <Card>
-          <CardHeader className="border-b">
-            <div className="flex items-center gap-2">
-              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                <ClipboardCheck className="size-4 text-muted-foreground" />
-                Hasil Resolusi
-              </CardTitle>
-              {ticket.handlerName && (
-                <Badge variant="secondary" className="ml-auto text-xs">
-                  Oleh: {ticket.handlerName}
-                </Badge>
-              )}
-            </div>
+          <CardHeader>
+            <CardTitle className="text-base">Hasil Resolusi</CardTitle>
+            <CardDescription>
+              {ticket.handlerName
+                ? `Penyelesaian yang diajukan oleh ${ticket.handlerName}.`
+                : 'Penyelesaian yang diajukan handler.'}
+            </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Ringkasan */}
-            <div>
-              <span className="text-xs font-semibold text-foreground block mb-1">Ringkasan Tindakan</span>
-              <p className="text-sm text-muted-foreground leading-relaxed bg-emerald-50 dark:bg-emerald-950/30 p-3.5 rounded-lg border border-emerald-200 dark:border-emerald-800">
-                {latestApprovedResolution?.summary}
+          <CardContent className="flex flex-col gap-6">
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-muted-foreground">Ringkasan Tindakan</p>
+              <p className="whitespace-pre-wrap rounded-lg bg-muted/50 p-4 text-sm leading-relaxed text-foreground">
+                {ticket.resolutionSummary}
               </p>
             </div>
 
-            {/* Detail */}
-            {latestApprovedResolution?.detail && (
-              <>
-                <Separator />
-                <div>
-                  <span className="text-xs font-semibold text-foreground block mb-1">Detail Penyelesaian</span>
-                  <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">
-                    {latestApprovedResolution.detail}
-                  </p>
-                </div>
-              </>
+            {ticket.resolutionDetail && (
+              <div className="flex flex-col gap-2">
+                <p className="text-xs text-muted-foreground">Detail Penyelesaian</p>
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                  {ticket.resolutionDetail}
+                </p>
+              </div>
             )}
 
-            {/* Lampiran Resolusi */}
-            {latestApprovedResolution?.attachments && latestApprovedResolution.attachments.length > 0 && (
-              <>
-                <Separator />
-                <div>
-                  <span className="text-xs font-semibold text-foreground block mb-2">
-                    Lampiran Bukti Penyelesaian ({latestApprovedResolution.attachments.length})
-                  </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {latestApprovedResolution.attachments.map((att) => (
-                      <a
-                        key={att.id}
-                        href={att.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-2 p-2.5 rounded-lg border bg-card hover:bg-accent transition-colors text-xs"
-                      >
-                        <Paperclip className="size-4 shrink-0 text-emerald-600" />
-                        <span className="font-medium truncate flex-1">{att.name}</span>
-                        <span className="text-[10px] text-muted-foreground">{att.size}</span>
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              </>
+            {ticket.resolutionAttachments && ticket.resolutionAttachments.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <p className="text-xs text-muted-foreground">
+                  Lampiran Bukti Penyelesaian ({ticket.resolutionAttachments.length})
+                </p>
+                <AttachmentList items={ticket.resolutionAttachments} layout="grid" />
+              </div>
             )}
           </CardContent>
         </Card>
       )}
 
-      {/* ── Ticket Details & Lampiran Grid ── */}
-      <div className="grid md:grid-cols-3 gap-6">
-        {/* Detail Rincian (2/3) */}
-        <Card className="md:col-span-2">
-          <CardHeader className="border-b">
-            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-              <FileText className="size-4 text-muted-foreground" />
-              Rincian Laporan
-            </CardTitle>
+      {/* Rincian Laporan
+          Wrapper grid `md:grid-cols-3` + `md:col-span-2` sudah dihapus
+          вместе sidebar 1/3.inggalnya membuat kartu ini terkunci di 2/3
+          lebar dengan ruang kosong di kanan — tidak ada lagi yang mengisi
+          kolom ketiga, jadi kartu ini sekarang full width seperti yang lain. */}
+      <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Rincian Laporan</CardTitle>
+            <CardDescription>Data laporan sebagaimana dikirim.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 text-xs">
-              <div>
-                <span className="text-muted-foreground block mb-0.5">Kategori Kendala</span>
-                <span className="font-semibold text-foreground">{ticket.category} ({ticket.subcategory})</span>
-              </div>
-              {ticket.category === 'Produk & Kendaraan' && (
-                <>
-                  <div>
-                    <span className="text-muted-foreground block mb-0.5">Model Kendaraan / Armada</span>
-                    <span className="font-semibold text-foreground">{ticket.vehicleModel || '-'}</span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground block mb-0.5">Lini Produk</span>
-                    <span className="font-semibold text-foreground">{ticket.productLine || '-'}</span>
-                  </div>
-                </>
-              )}
-            </div>
+          <CardContent className="flex flex-col gap-6">
+            {/* Kategori TIDAK ada di TicketSummary — itu identitas (siapa/apa/
+                di mana), sedangkan kategori adalah klasifikasi laporan. Jadi
+                tetap di sini, sama seperti unit & approver. */}
+            <DetailList
+              items={[
+                {
+                  label: 'Kategori Kendala',
+                  value: `${ticket.category} (${ticket.subcategory})`,
+                },
+              ]}
+            />
 
-            <Separator />
-
-            <div>
-              <span className="text-xs text-muted-foreground block mb-1">Deskripsi Lengkap</span>
-              <p className="text-xs md:text-sm text-foreground leading-relaxed whitespace-pre-line bg-muted/30 p-3.5 rounded-lg border">
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-muted-foreground">Deskripsi Lengkap</p>
+              <p className="whitespace-pre-line rounded-lg bg-muted/50 p-4 text-sm leading-relaxed text-foreground">
                 {ticket.description}
               </p>
             </div>
 
             {ticket.claimedItems && ticket.claimedItems.length > 0 && (
-              <div>
-                <span className="text-xs font-semibold text-foreground block mb-2">Informasi Barang Claim</span>
+              <div className="flex flex-col gap-2">
+                <p className="text-xs text-muted-foreground">Informasi Barang Claim</p>
                 <ClaimItemsTable items={ticket.claimedItems} />
               </div>
             )}
 
             {ticket.attachments && ticket.attachments.length > 0 && (
-              <>
-                <Separator />
-                <div>
-                  <span className="text-xs text-muted-foreground block mb-2">Lampiran Bukti ({ticket.attachments.length})</span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {ticket.attachments.map((att) => (
-                      <a
-                        key={att.id}
-                        href={att.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-2 p-2.5 rounded-lg border bg-card hover:bg-accent transition-colors text-xs"
-                      >
-                        <Paperclip className="size-4 shrink-0 text-primary" />
-                        <span className="font-medium truncate flex-1">{att.name}</span>
-                        <span className="text-[10px] text-muted-foreground">{att.size}</span>
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              </>
+              <div className="flex flex-col gap-2">
+                <p className="text-xs text-muted-foreground">
+                  Lampiran Bukti ({ticket.attachments.length})
+                </p>
+                <AttachmentList items={ticket.attachments} layout="grid" />
+              </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Sidebar (1/3) */}
-        <div className="space-y-6">
-          <Card className="bg-muted/20 border-dashed">
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                <MessageSquare className="size-4 text-muted-foreground" />
-                Diskusi / Bantuan Laporan
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Butuh memberikan klarifikasi atau menanyakan status terkini kepada reviewer? Gunakan fitur percakapan langsung.
-              </p>
-              <Button
-                onClick={() => setChatOpen(true)}
-                className="w-full gap-2 text-xs font-semibold"
-              >
-                <MessageSquare className="size-4" />
-                <span>Buka Diskusi Tiket</span>
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                <User className="size-4 text-muted-foreground" />
-                Informasi Kontak Pelapor
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2.5 text-xs text-muted-foreground">
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5"><User className="size-3.5" /> Nama:</span>
-                <span className="font-medium text-foreground">{ticket.reporterName}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5"><Phone className="size-3.5" /> Telepon:</span>
-                <span className="font-medium text-foreground">{ticket.reporterPhone}</span>
-              </div>
-              <div className="flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5 shrink-0"><MapPin className="size-3.5" /> Alamat:</span>
-                <span className="font-medium text-foreground text-right truncate">{ticket.reporterAddress}</span>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      <TicketTimeline activities={ticket.activities} />
     </div>
   );
 }

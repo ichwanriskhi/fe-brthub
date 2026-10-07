@@ -1,28 +1,46 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSeparator } from '@/components/ui/field';
+import { Field, FieldGroup, FieldLabel, FieldSeparator } from '@/components/ui/field';
 import { ModeToggle } from '@/components/shared/ModeToggle';
 import { ArrowLeft, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 import { authServiceClient } from '@/lib/api/auth-service';
-import { brthubApi, deriveRoles, resolveRoleRedirect, roleFromRedirect } from '@/lib/api/brthub-api';
+import { brthubApi, deriveRoles, resolveStaffDestination, roleFromRedirect } from '@/lib/api/brthub-api';
+import { SESSION_EXPIRED_FLAG } from '@/lib/api/fetch-wrapper';
 import { useAuth } from '@/lib/auth/auth-context';
 import type { AuthUser } from '@/lib/auth/auth-context';
 
-const BRTHUB_APP_ID = 'brthub_client_SAypfMmFdNpzizRcKbCX';
-
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Tujuan kembali setelah login (dipasang fetch-wrapper saat sesi habis).
+  // Divalidasi di `resolveStaffDestination`: path absolut milik salah satu
+  // role user, selebihnya role default.
+  const nextParam = searchParams.get('next');
   const { login } = useAuth();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  // Flag dipasang fetch-wrapper sebelum hard-redirect — toast di halaman lama
+  // ikut hilang saat reload, jadi pesannya ditampilkan di sini.
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(SESSION_EXPIRED_FLAG)) {
+        sessionStorage.removeItem(SESSION_EXPIRED_FLAG);
+        toast.error('Sesi Anda telah habis. Silakan login kembali.');
+      }
+    } catch {
+      // Storage tidak tersedia — abaikan.
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,8 +88,8 @@ export default function LoginPage() {
 
       // Simpan via AuthContext (konsisten dengan OTP flow),
       // sekaligus sinkronkan badge dengan halaman tujuan.
-      const destination = resolveRoleRedirect(roles, null);
-      login(accessToken, refreshToken, authUser, roleFromRedirect(destination));
+      const destination = resolveStaffDestination(roles, null, nextParam);
+      login(accessToken, refreshToken, authUser, roleFromRedirect(destination), loginResp.data?.expires_in);
 
       toast.success(`Login berhasil! Selamat datang, ${meData.user.full_name}.`);
       router.push(destination);
@@ -106,7 +124,7 @@ export default function LoginPage() {
                                 <Input
                                   id="identifier"
                                   type="text"
-                                  placeholder="email@domain.com atau 08123456789"
+                                  placeholder="Masukkan email / nomor Anda"
                                   value={identifier}
                                   onChange={(e) => setIdentifier(e.target.value)}
                                   autoComplete="email"
@@ -132,6 +150,7 @@ export default function LoginPage() {
 
                   <Field>
                     <Button type="submit" disabled={isLoading} className="w-full">
+                      {isLoading && <Spinner data-icon="inline-start" />}
                       {isLoading ? 'Memproses...' : 'Masuk Sekarang'}
                     </Button>
                   </Field>
@@ -141,7 +160,13 @@ export default function LoginPage() {
               <FieldSeparator className="my-6">atau</FieldSeparator>
 
               <Button variant="outline" className="w-full" asChild>
-                <Link href="/verifikasi?mode=staff">
+                <Link
+                  href={
+                    nextParam
+                      ? `/verifikasi?mode=staff&next=${encodeURIComponent(nextParam)}`
+                      : '/verifikasi?mode=staff'
+                  }
+                >
                   <Smartphone data-icon="inline-start" />
                   Masuk menggunakan kode OTP
                 </Link>
@@ -172,5 +197,27 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-svh flex-col bg-muted/20">
+          <div className="flex flex-1 items-center justify-center px-4 py-12">
+            <div className="w-full max-w-md">
+              <Card className="shadow-xs">
+                <CardContent className="p-6 text-center text-sm text-muted-foreground">
+                  Memuat halaman login…
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }

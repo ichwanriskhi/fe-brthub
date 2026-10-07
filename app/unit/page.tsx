@@ -1,36 +1,127 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import type { ColumnVisibilityState } from '@tanstack/react-table';
 import Link from 'next/link';
 import { getUnitTickets, getUnitHistory } from '@/lib/api/handler';
 import type { Ticket } from '@/lib/types/ticket';
 import { reporterDisplay, reporterInitials } from '@/lib/utils/ticket-display';
 import { StatusBadge, TypeBadge, PriorityBadge } from '@/components/shared/StatusBadge';
 import { StatisticsCard } from '@/components/shared/StatisticsCard';
+import { DataTable, createColumnHelper, type ColumnDef } from '@/components/shared/DataTable';
+import type { DataTableFeatures } from '@/components/shared/data-table-features';
+import { TableSkeleton } from '@/components/shared/TableSkeleton';
+import { ColumnToggle } from '@/components/shared/ColumnToggle';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Spinner } from '@/components/ui/spinner';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Inbox, LoaderCircle, CircleDashed, Timer, ArrowUpRight, UserPlus, Loader2, AlertCircle } from 'lucide-react';
+import {
+  Inbox,
+  Clock,
+  CircleDashed,
+  Timer,
+  ArrowUpRight,
+  UserPlus,
+  AlertCircle,
+  CircleCheckBig,
+} from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+
+const URGENT_LIMIT = 5;
 
 function toEpoch(value: string): number {
   const n = Date.parse(value);
   return Number.isNaN(n) ? 0 : n;
 }
 
+const columnHelper = createColumnHelper<DataTableFeatures, Ticket>();
+
+const queueColumns: ColumnDef<DataTableFeatures, Ticket>[] = columnHelper.columns([
+  columnHelper.accessor('id', {
+    header: 'ID Tiket',
+    cell: ({ row }) => (
+      <span className="font-mono text-xs whitespace-nowrap">{row.original.id}</span>
+    ),
+  }),
+  columnHelper.accessor('subject', {
+    header: 'Subjek',
+    cell: ({ row }) => (
+      <div className="max-w-[240px] space-y-0.5">
+        <p className="truncate text-sm font-medium">{row.original.subject}</p>
+        <p className="truncate text-xs text-muted-foreground">{row.original.category}</p>
+      </div>
+    ),
+  }),
+  columnHelper.display({
+    id: 'tipe',
+    header: 'Tipe',
+    cell: ({ row }) => <TypeBadge ticketType={row.original.ticketType} />,
+  }),
+  columnHelper.display({
+    id: 'prioritas',
+    header: 'Prioritas',
+    cell: ({ row }) => <PriorityBadge priority={row.original.priority} />,
+  }),
+  columnHelper.display({
+    id: 'pelapor',
+    header: 'Pelapor',
+    cell: ({ row }) => (
+      <div className="flex items-center gap-2">
+        <Avatar className="size-6 shrink-0">
+          <AvatarFallback className="text-[10px]">{reporterInitials(row.original)}</AvatarFallback>
+        </Avatar>
+        <span className="truncate text-sm">{reporterDisplay(row.original)}</span>
+      </div>
+    ),
+  }),
+  columnHelper.display({
+    id: 'handler',
+    header: 'Handler',
+    cell: ({ row }) => (
+      <span className="text-xs">
+        {row.original.handlerName ?? <span className="text-muted-foreground">Belum ada</span>}
+      </span>
+    ),
+  }),
+  columnHelper.display({
+    id: 'aksi',
+    header: () => <div className="text-right">Aksi</div>,
+    cell: ({ row }) => (
+      <div className="text-right">
+        <Button size="sm" asChild>
+          <Link href={`/unit/tiket/${row.original.id}`}>
+            <UserPlus data-icon="inline-start" />
+            Assign
+          </Link>
+        </Button>
+      </div>
+    ),
+    enableHiding: false,
+  }),
+]);
+
 export default function UnitDashboardPage() {
   const [queue, setQueue] = useState<Ticket[]>([]);
   const [history, setHistory] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>({});
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
 
-    Promise.all([getUnitTickets(1), getUnitHistory(1)])
+    Promise.all([getUnitTickets({ page: 1 }), getUnitHistory(1)])
       .then(([queueResult, historyResult]) => {
         if (cancelled) return;
         setQueue(queueResult.data);
@@ -77,7 +168,7 @@ export default function UnitDashboardPage() {
       label: 'Sedang Dikerjakan',
       value: String(inProgressCount),
       subtitle: 'Diproses oleh handler',
-      icon: LoaderCircle,
+      icon: Clock,
       showTrend: true,
     },
     {
@@ -134,7 +225,7 @@ export default function UnitDashboardPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <Loader2 className="size-8 animate-spin text-muted-foreground/60" />
+        <Spinner className="size-8 text-muted-foreground/60" />
       </div>
     );
   }
@@ -272,10 +363,10 @@ export default function UnitDashboardPage() {
                         : '-'}
                     </span>
                     <StatusBadge status={item.status} />
-                    <Button variant="outline" size="sm" asChild className="gap-1 text-xs">
+                    <Button size="sm" asChild>
                       <Link href={`/unit/tiket/${item.ticketId}`}>
                         Detail
-                        <ArrowUpRight className="size-3" />
+                        <ArrowUpRight data-icon="inline-end" />
                       </Link>
                     </Button>
                   </div>
@@ -287,15 +378,20 @@ export default function UnitDashboardPage() {
       </div>
 
       {/* Queue table */}
-      <Card className="w-full gap-0 overflow-hidden p-0">
-        <CardHeader className="border-b px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <CardTitle>Menunggu Penugasan</CardTitle>
-              <CardDescription className="text-xs">
-                Tiket yang sudah disetujui dan diterima departemen Anda
-              </CardDescription>
-            </div>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Menunggu Penugasan</CardTitle>
+            <CardDescription>
+              {URGENT_LIMIT} tiket yang sudah disetujui dan diterima departemen Anda
+            </CardDescription>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <ColumnToggle
+              columns={queueColumns}
+              visibility={columnVisibility}
+              onVisibilityChange={setColumnVisibility}
+            />
             <Button variant="outline" size="sm" asChild>
               <Link href="/unit/antrean">
                 Lihat semua
@@ -304,119 +400,81 @@ export default function UnitDashboardPage() {
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="p-0">
-          {pendingQueue.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 border-t py-12 text-center">
-              <Inbox className="size-8 text-muted-foreground/60" />
-              <p className="text-sm font-medium">Tidak ada tiket yang menunggu penugasan</p>
-              <p className="text-xs text-muted-foreground">
-                Semua tiket departemen Anda sudah memiliki handler.
-              </p>
-            </div>
+        <CardContent>
+          {loading && pendingQueue.length === 0 ? (
+            <TableSkeleton rows={URGENT_LIMIT} />
+          ) : pendingQueue.length === 0 ? (
+            <Empty className="border-0 py-12">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <CircleCheckBig />
+                </EmptyMedia>
+                <EmptyTitle>Tidak ada tiket yang menunggu penugasan</EmptyTitle>
+                <EmptyDescription>
+                  Semua tiket departemen Anda sudah memiliki handler.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
             <>
-              <div className="border-t md:hidden">
-                {pendingQueue.slice(0, 5).map((ticket) => (
-                  <div key={ticket.id} className="space-y-3 border-b p-4 last:border-0">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 space-y-1">
-                        <p className="font-mono text-xs text-muted-foreground">{ticket.id}</p>
-                        <p className="line-clamp-2 text-sm font-semibold">{ticket.subject}</p>
-                        <p className="truncate text-xs text-muted-foreground">{ticket.category}</p>
+              <div
+                className={cn(
+                  // Tanpa `px-*`: `CardContent` sudah memberi padding kiri-kanan.
+                  'space-y-3 transition-opacity md:hidden',
+                  loading && 'pointer-events-none opacity-50',
+                )}
+              >
+                {pendingQueue.slice(0, URGENT_LIMIT).map((ticket) => (
+                  <div key={ticket.id} className="rounded-lg border bg-card py-4">
+                    <div className="space-y-3 px-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-1">
+                          <p className="font-mono text-xs text-muted-foreground">{ticket.id}</p>
+                          <p className="line-clamp-2 text-sm font-semibold">{ticket.subject}</p>
+                          <p className="truncate text-xs text-muted-foreground">{ticket.category}</p>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1.5">
+                          <PriorityBadge priority={ticket.priority} />
+                          <TypeBadge ticketType={ticket.ticketType} />
+                        </div>
                       </div>
-                      <div className="flex shrink-0 flex-col items-end gap-1.5">
-                        <PriorityBadge priority={ticket.priority} />
-                        <TypeBadge ticketType={ticket.ticketType} />
+                      <div className="flex items-center gap-2">
+                        <Avatar className="size-5 shrink-0">
+                          <AvatarFallback className="text-[10px]">
+                            {reporterInitials(ticket)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="flex-1 truncate text-xs text-muted-foreground">
+                          {reporterDisplay(ticket)}
+                        </span>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Avatar className="size-5 shrink-0">
-                        <AvatarFallback className="text-[10px]">
-                          {reporterInitials(ticket)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <span className="flex-1 truncate text-xs text-muted-foreground">
-                        {reporterDisplay(ticket)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                        <Timer className="size-3.5" /> {ticket.handlerName ? 'Ada handler' : 'Belum ada handler'}
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        asChild
-                        className="h-7 gap-1.5 px-3 text-xs"
-                      >
-                        <Link href={`/unit/tiket/${ticket.id}`}>
-                          <UserPlus className="size-3.5" />
-                          Assign
-                        </Link>
-                      </Button>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                          <Timer className="size-3.5" /> {ticket.handlerName ? 'Ada handler' : 'Belum ada handler'}
+                        </span>
+                        <Button size="sm" asChild>
+                          <Link href={`/unit/tiket/${ticket.id}`}>
+                            <UserPlus data-icon="inline-start" />
+                            Assign
+                          </Link>
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
 
-              <div className="hidden md:block">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="bg-muted/50 px-6 py-3">ID Tiket</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3">Subjek</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3">Tipe</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3">Prioritas</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3">Pelapor</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3">Handler</TableHead>
-                      <TableHead className="bg-muted/50 px-6 py-3 text-right">Aksi</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {pendingQueue.slice(0, 5).map((ticket) => (
-                      <TableRow key={ticket.id}>
-                        <TableCell className="whitespace-nowrap px-6 py-3 font-mono text-xs">{ticket.id}</TableCell>
-                        <TableCell className="px-6 py-3">
-                          <div className="max-w-[240px] space-y-0.5">
-                            <p className="truncate text-sm font-medium">{ticket.subject}</p>
-                            <p className="truncate text-xs text-muted-foreground">{ticket.category}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="px-6 py-3">
-                          <TypeBadge ticketType={ticket.ticketType} />
-                        </TableCell>
-                        <TableCell className="px-6 py-3">
-                          <PriorityBadge priority={ticket.priority} />
-                        </TableCell>
-                        <TableCell className="px-6 py-3">
-                          <div className="flex items-center gap-2">
-                            <Avatar className="size-8">
-                              <AvatarFallback className="text-xs">
-                                {reporterInitials(ticket)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <span className="text-sm">
-                              {reporterDisplay(ticket)}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="px-6 py-3 text-xs">
-                          {ticket.handlerName ?? (
-                            <span className="text-muted-foreground">Belum ada</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="px-6 py-3 text-right">
-                          <Button variant="outline" size="sm" asChild className="gap-1.5 text-xs">
-                            <Link href={`/unit/tiket/${ticket.id}`}>
-                              <UserPlus className="size-3.5" />
-                              Assign
-                            </Link>
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+              <div
+                className={cn('hidden md:block', loading && 'pointer-events-none opacity-50')}
+              >
+                <DataTable
+                  columns={queueColumns}
+                  data={pendingQueue.slice(0, URGENT_LIMIT)}
+                  isPending={loading}
+                  columnVisibility={columnVisibility}
+                  onColumnVisibilityChange={setColumnVisibility}
+                  emptyText="Tidak ada tiket yang menunggu penugasan."
+                />
               </div>
             </>
           )}

@@ -37,14 +37,39 @@ const ROUTE_LABELS: Record<string, string> = {
   '/handler/history': 'Riwayat',
 };
 
-function HandlerBreadcrumb({ pathname }: { pathname: string }) {
+/**
+ * Asal daftar untuk detail tiket, dibaca dari `?from=`.
+ *
+ * Handler punya empat daftar yang semuanya dilayani route `/handler/ticket`.
+ * Tanpa penanda ini, crumb tidak bisa menyebut daftar mana yang sedang dibuka.
+ * `ROUTE_LABELS` dipakai ulang supaya label crumb tidak pernah berbeda dengan
+ * label di navigasi.
+ */
+const HANDLER_TICKET_ORIGINS: Record<string, string> = {
+  'need-action': '/handler/need-action',
+  'waiting-review': '/handler/waiting-for-review',
+  rework: '/handler/rework-required',
+  history: '/handler/history',
+};
+
+function HandlerBreadcrumb({
+  pathname,
+  searchParams,
+}: {
+  pathname: string;
+  searchParams: URLSearchParams;
+}) {
   const segments = pathname.split('/').filter(Boolean);
   const isTicketDetail = segments[1] === 'ticket' && segments.length >= 3;
 
   let crumbs: { href: string; label: string; isLast: boolean }[] = [];
   if (isTicketDetail) {
+    const origin =
+      HANDLER_TICKET_ORIGINS[searchParams.get('from') ?? ''] ?? HANDLER_TICKET_ORIGINS['need-action'];
+
     crumbs = [
       { href: '/handler', label: 'Dashboard', isLast: false },
+      { href: origin, label: ROUTE_LABELS[origin], isLast: false },
       { href: pathname, label: 'Detail Tiket', isLast: true },
     ];
   } else {
@@ -83,7 +108,7 @@ export default function HandlerLayout({ children }: { children: React.ReactNode 
         routeLabels={ROUTE_LABELS}
         badgeCounts={{}}
         rootHref="/handler"
-        renderBreadcrumb={(p) => <HandlerBreadcrumb pathname={p} />}
+        renderBreadcrumb={(p, sp) => <HandlerBreadcrumb pathname={p} searchParams={sp} />}
       >
         {children}
       </AppLayout>

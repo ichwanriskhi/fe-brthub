@@ -4,6 +4,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { useRouter } from 'next/navigation';
 import { brthubApi, defaultRole, MeUser, BrthubData, ROLE_REDIRECT } from '@/lib/api/brthub-api';
 import type { AppRole } from '@/lib/api/brthub-api';
+import { setTokenExpiry } from '@/lib/api/fetch-wrapper';
 import { toast } from 'sonner';
 
 // ─── Storage keys ─────────────────────────────────────────────────────────────
@@ -33,7 +34,7 @@ export interface AuthContextValue {
    * `activeRole` opsional: role yang sedang dibuka (dari halaman tujuan).
    * Selalu diisi saat login agar badge = halaman, satu sumber kebenaran.
    */
-  login: (token: string, refreshToken: string, user: AuthUser, activeRole?: string | null) => void;
+  login: (token: string, refreshToken: string, user: AuthUser, activeRole?: string | null, expiresInSec?: number) => void;
   logout: () => Promise<void>;
   hasRole: (role: string) => boolean;
   /**
@@ -98,12 +99,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const login = useCallback((accessToken: string, refreshToken: string, authUser: AuthUser, role?: string | null) => {
+  const login = useCallback((accessToken: string, refreshToken: string, authUser: AuthUser, role?: string | null, expiresInSec?: number) => {
     localStorage.setItem(TOKEN_KEY, accessToken);
     localStorage.setItem(REFRESH_KEY, refreshToken);
     localStorage.setItem(USER_KEY, JSON.stringify(authUser));
     setToken(accessToken);
     setUser(authUser);
+    // Umur untuk scheduler proaktif — tanpa ini proactive tidak punya dasar angka.
+    if (Number.isFinite(Number(expiresInSec)) && Number(expiresInSec) > 0) {
+      setTokenExpiry('staff', Number(expiresInSec));
+    }
     // Sinkronkan role aktif saat login — badge dan halaman tujuan
     // dihitung dari nilai yang sama, tidak lagi dari dua urutan berbeda.
     if (role) {
